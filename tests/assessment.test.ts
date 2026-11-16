@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   modelFixture,
   rawAssessment,
@@ -7,6 +8,109 @@ import {
   evidence,
   inputFor,
 } from "./model-helpers.js";
+
+test("选段正确不等于端点已掌握，端点补充后累计达标；教师自定义标准仍优先", async () => {
+  const lesson = JSON.parse(
+    readFileSync("server/content/lessons.json", "utf8"),
+  )[1];
+  const select = studentMessage("select", "x=2满足x≥0，所以用x²");
+  const endpoint = studentMessage(
+    "endpoint",
+    "x=0满足x≥0，不满足x<0，所以用x²",
+  );
+  const f = await modelFixture((_r, n) =>
+    rawAssessment({
+      checks: [
+        {
+          id: "function-representation-c2",
+          parts: [
+            {
+              id: n === 1 ? "interval" : n === 2 ? "endpoint" : "criterion-1",
+              status: "met",
+              evidence: [
+                evidence(
+                  n === 1 ? select.id : endpoint.id,
+                  n === 1 ? select.body : endpoint.body,
+                ),
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  try {
+    const first = await f.evaluate(inputFor([select], { lesson }));
+    assert.equal(first.checks[1].met, false);
+    assert.equal(
+      first.checks[1].parts?.find((p) => p.id === "interval")?.status,
+      "met",
+    );
+    assert.equal(
+      first.checks[1].parts?.find((p) => p.id === "endpoint")?.status,
+      "missing",
+    );
+    const second = await f.evaluate(
+      inputFor([select, endpoint], { lesson, previousChecks: first.checks }),
+    );
+    assert.equal(second.checks[1].met, true);
+    const edited = structuredClone(lesson);
+    edited.checklist[1].criterion = "只解释本题端点选段";
+    const custom = await f.evaluate(inputFor([endpoint], { lesson: edited }));
+    assert.equal(custom.checks[1].parts?.length, 1);
+    assert.equal(custom.checks[1].parts?.[0].label, "只解释本题端点选段");
+    assert.equal(custom.checks[1].met, true);
+  } finally {
+    await f.close();
+  }
+});
+
+test("纯表态不能充作本题理由，但简短确认不抹去此前有效理由", async () => {
+  let quoted: Array<{ messageId: string; quote: string; kind: string }> = [];
+  const f = await modelFixture(() =>
+    rawAssessment({
+      reasoningAccepted: true,
+      corrected: true,
+      reasoningEvidence: quoted,
+      correctionEvidence: quoted,
+      feedback: "我明白了，这题已经完成！",
+    }),
+  );
+  try {
+    for (const body of [
+      "你做的对",
+      "你做得对！",
+      "我觉得是对的",
+      "没错",
+      "满足",
+      "你还有别的问题吗",
+    ]) {
+      const m = studentMessage("agreement", body, "judge");
+      quoted = [evidence(m.id, m.body)];
+      const r = await f.evaluate(inputFor([m]));
+      assert.equal(r.reasoningAccepted, false, body);
+      assert.equal(r.corrected, false, body);
+      assert.equal(r.reviewRequired, false, body);
+      assert.match(r.feedback, /依据|为什么|理由/, body);
+    }
+    const reason = studentMessage(
+      "reason",
+      "两个函数的定义域不同，所以不是同一个函数",
+      "judge",
+    );
+    const short = studentMessage("short", "没错", "judge");
+    quoted = [evidence(reason.id, reason.body), evidence(short.id, short.body)];
+    const accepted = await f.evaluate(inputFor([reason, short]));
+    assert.equal(accepted.reasoningAccepted, true);
+    assert.equal(accepted.corrected, true);
+    assert.deepEqual(
+      accepted.reasoningEvidence?.map((e) => e.messageId),
+      ["reason"],
+    );
+  } finally {
+    await f.close();
+  }
+});
 
 test("助手解题和其他例题的学生回答不能成为本题通过证据，说明与最终字段保持一致", async () => {
   const f = await modelFixture(() =>

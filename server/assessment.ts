@@ -6,34 +6,13 @@ import type {
   Message,
 } from "../shared/types.js";
 import type { AIInput, AIResult } from "./ai.js";
+import { canSupportReasoning } from "./dialogue.js";
 
-// These decompositions only apply to the exact reviewed criteria. Teacher edits
-// use their own newline-separated criteria, without silently restoring defaults.
-const conceptParts: Record<string, Array<[string, string]>> = {
-  "说明定义域是非空数集，每个输入都有且只有一个输出；允许多对一。": [
-    ["nonempty", "定义域是非空数集"],
-    ["total", "定义域中的每个输入都有输出"],
-    ["unique", "同一个输入只有一个输出"],
-    ["many_to_one", "允许多个输入对应同一个输出"],
-  ],
-  "正确区分定义域、对应规则、值域，并解释函数值符号。": [
-    ["domain", "定义域是允许输入的自变量集合"],
-    ["rule", "对应规则确定输入与输出的关系"],
-    ["range", "值域是实际输出的集合"],
-    ["value", "f(a)表示输入a对应的函数值"],
-  ],
-  "知道各限制需要同时满足，化简时不能随意扩大定义域。": [
-    ["simultaneous", "各项定义域限制需要同时满足"],
-    ["preserve_domain", "化简时保留原定义域限制"],
-  ],
-  "以定义域相同且对应规则相同为依据，不仅比较式子的外观。": [
-    ["domain", "比较函数时考虑定义域"],
-    ["rule", "比较函数时考虑对应规则而不只看式子外观"],
-  ],
-};
+import { reviewedParts } from "./rubrics.js";
+
 export const MAX_CRITERIA_PARTS = 20;
 function partsFor(criterion: string): Array<[string, string]> {
-  if (Object.hasOwn(conceptParts, criterion)) return conceptParts[criterion];
+  if (Object.hasOwn(reviewedParts, criterion)) return reviewedParts[criterion];
   const lines = criterion
     .split(/\r?\n/)
     .map((s) => s.trim())
@@ -204,9 +183,13 @@ export function normalizeAssessment(
         byId.get(r.messageId)?.stage === "judge" &&
         byId.get(r.messageId)?.exerciseIndex === input.exerciseIndex,
     );
-    if (claimed && (!accepted.length || accepted.length !== refs.length))
+    if (claimed && (!accepted.length || accepted.length !== refs.length)) {
       warnings.push(`${label}：缺少本题学生作答的有效证据。`);
-    return accepted;
+      return [];
+    }
+    return accepted.filter(
+      (r) => r.kind === "image" || canSupportReasoning(r.quote),
+    );
   };
   const reasoningEvidence = taskRefs(
     raw.reasoningEvidence,
@@ -221,13 +204,9 @@ export function normalizeAssessment(
   const reasoningAccepted =
     input.stage === "judge" &&
     raw.reasoningAccepted &&
-    reasoningEvidence.length > 0 &&
-    reasoningEvidence.length === raw.reasoningEvidence.length;
+    reasoningEvidence.length > 0;
   const corrected =
-    input.stage === "judge" &&
-    raw.corrected &&
-    correctionEvidence.length > 0 &&
-    correctionEvidence.length === raw.correctionEvidence.length;
+    input.stage === "judge" && raw.corrected && correctionEvidence.length > 0;
   let issue = input.stage === "explain" ? raw.issue : null;
   if (issue) {
     const part = checks
@@ -257,7 +236,13 @@ export function normalizeAssessment(
       ? "\n证据核验存在疑问，待复核；不能据此认定学生未掌握。"
       : "");
   return {
-    feedback: raw.feedback,
+    feedback:
+      input.stage === "judge" &&
+      raw.reasoningAccepted &&
+      !reasoningAccepted &&
+      !warnings.length
+        ? "我还想听懂这道题的依据。你能选一个关键步骤，说明为什么这样做吗？"
+        : raw.feedback,
     checks,
     issue,
     reasoningAccepted,

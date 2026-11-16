@@ -480,7 +480,7 @@ function Live({
                       <small>有系统评价需复核</small>
                     )}
                     <span className="student-message-count">
-                      {p.messageCount} 次讲解{p.pending ? " · 有待补任务" : ""}
+                      {p.messageCount} 次提交{p.pending ? " · 有待补任务" : ""}
                     </span>
                   </button>
                 ))}
@@ -572,6 +572,36 @@ function TeacherTranscript({ detail }: { detail: SessionDetail }) {
       </div>
       {detail.messages.length ? (
         <>
+          <details className="evaluation-details">
+            <summary>
+              查看例题作答统计 <ChevronRight size={15} />
+            </summary>
+            {detail.lesson.exercises.map((ex) => {
+              const j = detail.participant?.judgments[ex.id];
+              return (
+                <div key={ex.id} className="evaluation-entry">
+                  <b>{ex.title}</b>
+                  <p>
+                    全部提交 {j?.attempts || 0} 次 · 首次达标前有效作答{" "}
+                    {j?.answerAttempts ?? "未记录"} 次 · 首次达标后交流{" "}
+                    {j?.postAchievementMessages ?? "未记录"} 次
+                  </p>
+                  <p>
+                    首次达标：
+                    {j?.firstAchievedAt
+                      ? new Date(j.firstAchievedAt).toLocaleString("zh-CN")
+                      : "未记录"}
+                  </p>
+                  {Boolean(j?.legacyAttempts) && (
+                    <p>另有 {j?.legacyAttempts} 次历史提交未分类。</p>
+                  )}
+                </div>
+              );
+            })}
+            <p className="muted small">
+              有效作答排除识别出的澄清与收尾，不代表答案正确。新统计从新版提交开始，历史记录不回填。
+            </p>
+          </details>
           <Conversation messages={detail.messages} />
           <details className="evaluation-details">
             <summary>
@@ -1357,7 +1387,7 @@ function Records({
                     detail.participant?.explainEvaluationStatus,
                   )}
                 />
-                <span>{detail.participant?.messageCount || 0} 次讲解</span>
+                <span>{detail.participant?.messageCount || 0} 次提交</span>
                 <span>
                   {detail.participant?.pending
                     ? "存在待补任务"

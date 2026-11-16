@@ -12,9 +12,11 @@ import type { Lesson, Message } from "../shared/types.js";
 const config = configFromEnv();
 if (!config.apiKey || config.demo)
   throw Error("真实模型检查需要配置 DeepSeek 密钥并关闭演示模式。");
-const lesson: Lesson = JSON.parse(
+const lessons: Lesson[] = JSON.parse(
   await readFile("server/content/lessons.json", "utf8"),
-)[0];
+);
+const lesson = lessons[0];
+const representation = lessons[1];
 const evaluate = makeEvaluator({
   ...config,
   timeout: Math.min(config.timeout, 60000),
@@ -146,6 +148,108 @@ const cases: Array<{
       part(r, 0, "unique") === "incorrect" && r.issue?.kind === "incorrect",
   },
 ];
+const representationInput = (messages: Message[]): AIInput => ({
+  ...input(messages),
+  lesson: representation,
+  messages: messages.map((m) =>
+    m.role === "student" && m.stage === "judge"
+      ? { ...m, judgment: representation.exercises[m.exerciseIndex].isCorrect }
+      : m,
+  ),
+});
+const representationAttempt = (i: number) =>
+  message(
+    `representation-attempt-${i}`,
+    `${representation.exercises[i].prompt}\n${representation.exercises[i].attempt}`,
+    "attempt",
+    i,
+    "assistant",
+  );
+cases.push(
+  {
+    name: "表示方法：只说你做的对不能通过正确题",
+    input: representationInput([
+      representationAttempt(0),
+      message("agreement", "你做的对", "judge"),
+    ]),
+    accepts: (r) => !r.reasoningAccepted,
+  },
+  {
+    name: "表示方法：解释复合求值的内外层选段后通过",
+    input: representationInput([
+      representationAttempt(0),
+      message(
+        "reason",
+        "-1≤1，所以f(-1)=-1+3=2。1也满足x≤1，所以f(1)=4。外层输入变成4，它满足x≥2，所以f(f(1))=f(4)=2×4-1=7。你每次都是按输入所在区间选段，所以做对了。",
+        "judge",
+      ),
+    ]),
+    accepts: (r) => r.reasoningAccepted,
+  },
+  {
+    name: "表示方法：跨轮指出区间错误并补上正确答案",
+    input: representationInput([
+      representationAttempt(1),
+      message(
+        "reason",
+        "a=±2的时候不满足1<x<2分段函数的定义域，所以做错了",
+        "judge",
+        1,
+      ),
+      message("question", "那正确的a应该是哪些数呢？", "judge", 1, "assistant"),
+      message("correction", "a=1或a=2.5", "judge", 1),
+    ]),
+    accepts: (r) => r.reasoningAccepted && r.corrected,
+  },
+  {
+    name: "表示方法：非端点选段正确不能代替端点证据",
+    input: representationInput([
+      message(
+        "question",
+        "当x<0时f(x)=x+1，当x≥0时f(x)=x²。输入x=2，你怎么选段？",
+        "explain",
+        0,
+        "assistant",
+      ),
+      message(
+        "select",
+        "先看输入所在区间，x=2满足x≥0，所以代入f(x)=x²",
+        "explain",
+      ),
+    ]),
+    accepts: (r) =>
+      part(r, 1, "interval") === "met" && part(r, 1, "endpoint") !== "met",
+  },
+  {
+    name: "表示方法：澄清分段函数时先补足问题条件",
+    input: representationInput([
+      message(
+        "question",
+        "遇到分段函数，输入x=2时你怎么选段？",
+        "explain",
+        0,
+        "assistant",
+      ),
+      message("clarify", "什么分段函数", "explain"),
+    ]),
+    accepts: (r) =>
+      /分段|区间/.test(r.feedback) &&
+      part(r, 1, "endpoint") !== "met" &&
+      !/我都讲清楚/.test(r.feedback),
+  },
+  {
+    name: "二分法：端点异号不能替代连续性条件",
+    input: {
+      ...input([
+        message("sign", "f(a)与f(b)符号相反，也就是f(a)f(b)<0", "explain"),
+      ]),
+      lesson: lessons.find((l) => l.id === "bisection")!,
+    },
+    accepts: (r) =>
+      part(r, 0, "opposite_signs") === "met" &&
+      part(r, 0, "continuous") !== "met",
+  },
+);
 const results = [];
 for (const c of cases) {
   const start = Date.now();
@@ -188,7 +292,7 @@ for (const c of cases) {
 }
 await mkdir("artifacts", { recursive: true });
 await writeFile(
-  "artifacts/ai-review-v2.json",
+  "artifacts/ai-review-v2.1.json",
   JSON.stringify(
     {
       date: new Date().toISOString(),

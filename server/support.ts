@@ -1,5 +1,6 @@
 import type { AIResult } from "./ai.js";
-import type { Evaluation } from "../shared/types.js";
+import type { Evaluation, SubmissionKind } from "../shared/types.js";
+import { completedFeedback } from "./dialogue.js";
 
 interface Support {
   version: 2;
@@ -23,7 +24,11 @@ export function readSupport(json: string): Support {
   };
 }
 
-export function explainFeedback(result: AIResult, support: Support) {
+export function explainFeedback(
+  result: AIResult,
+  support: Support,
+  kind: SubmissionKind = "answer",
+) {
   for (const check of result.checks) {
     if (check.met) {
       for (const key of Object.keys(support.active))
@@ -40,7 +45,14 @@ export function explainFeedback(result: AIResult, support: Support) {
     kind: "acknowledge",
     target: "",
   };
-  if (issue) {
+  if (kind === "clarification") {
+    interaction = {
+      kind: "clarification",
+      target: issue ? `${issue.key}:${issue.partId}` : "",
+    };
+  } else if (result.checks.length && result.checks.every((c) => c.met)) {
+    feedback = completedFeedback("explain");
+  } else if (issue) {
     const target = `${issue.key}:${issue.partId || "criterion"}`;
     const count = support.active[target] || 0;
     const kind =

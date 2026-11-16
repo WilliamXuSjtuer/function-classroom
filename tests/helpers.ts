@@ -117,9 +117,9 @@ export async function fixture(evaluator: Evaluator = goodEvaluation) {
     );
     return { id: c.id, students, cookies };
   }
-  async function open(classId: string) {
+  async function open(classId: string, lessonIndex = 0) {
     const { lessons } = await request("GET", "/bootstrap", undefined, teacher);
-    const lesson = lessons[0];
+    const lesson = lessons[lessonIndex];
     if (lesson.status !== "published")
       await request(
         "POST",

@@ -81,6 +81,11 @@ export interface Attachment {
   size: number;
   url: string;
 }
+export type SubmissionKind = "answer" | "clarification" | "social";
+export interface Submission {
+  kind: SubmissionKind;
+  afterAchievement: boolean;
+}
 export interface Message {
   id: string;
   userId: string;
@@ -95,6 +100,7 @@ export interface Message {
   attachments: Attachment[];
   evaluation?: Evaluation | null;
   replyTo?: string | null;
+  submission?: Submission;
 }
 export interface CheckResult {
   id: string;
@@ -129,8 +135,17 @@ export interface Evaluation {
   validationWarnings?: string[];
   reviewRequired?: boolean;
   modelAttempts?: number;
+  taskPassed?: boolean;
+  evaluatedAt?: string;
+  evaluationSkipped?: boolean;
   interaction?: {
-    kind: "question" | "supplement" | "correction" | "acknowledge" | "review";
+    kind:
+      | "question"
+      | "supplement"
+      | "correction"
+      | "acknowledge"
+      | "review"
+      | "clarification";
     target: string;
   };
 }
@@ -150,6 +165,15 @@ export interface Participant {
       status: string;
       hints: number;
       evaluationStatus?: string;
+      answerAttempts?: number;
+      clarificationMessages?: number;
+      socialMessages?: number;
+      postAchievementMessages?: number;
+      firstAchievedAt?: string;
+      firstAchievedMessageId?: string;
+      statisticsStartedAt?: string;
+      legacyAttempts?: number;
+      firstAchievementUnknown?: boolean;
     }
   >;
   pending: boolean;

@@ -23,7 +23,15 @@ export class Store {
       CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),session_id TEXT NOT NULL REFERENCES sessions(id),message_id TEXT REFERENCES messages(id),name TEXT NOT NULL,path TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id),actor_id TEXT NOT NULL REFERENCES users(id),kind TEXT NOT NULL,details TEXT NOT NULL,created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS login_limits(key TEXT PRIMARY KEY,attempts INTEGER NOT NULL,reset_at INTEGER NOT NULL);
-      PRAGMA user_version=1;`);
+      `);
+    // Nullable metadata keeps pre-v2.1 classroom records explicitly unclassified.
+    if (
+      !this.all<{ name: string }>("PRAGMA table_info(messages)").some(
+        (c) => c.name === "submission",
+      )
+    )
+      this.db.exec("ALTER TABLE messages ADD COLUMN submission TEXT");
+    this.db.exec("PRAGMA user_version=2");
   }
   get<T = any>(sql: string, ...args: SQLInputValue[]): T | undefined {
     return this.db.prepare(sql).get(...args) as T | undefined;

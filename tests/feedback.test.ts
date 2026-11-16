@@ -5,6 +5,98 @@ import { fixture, goodEvaluation } from "./helpers.js";
 import ExcelJS from "exceljs";
 import unzipper from "unzipper";
 
+test("例题通过后明确收尾，保留全部提交并单列有效作答和达标后交流", async () => {
+  let calls = 0;
+  const f = await fixture(async (input) => {
+    calls++;
+    const body = input.messages
+      .filter((m) => m.role === "student")
+      .at(-1)!.body;
+    if (body === "没错" || body === "你还有别的问题吗")
+      throw Error("收尾无需重新评价");
+    return {
+      ...(await goodEvaluation(input)),
+      reasoningAccepted: calls > 1,
+      corrected: calls > 1,
+      feedback:
+        calls > 1
+          ? "那 a=1 和 a=5/2 分别满足各自的区间吗？"
+          : "那正确的 a 是哪些数？",
+    };
+  });
+  try {
+    const c = await f.classroom(1);
+    const s = await f.open(c.id, 1);
+    await f.control(s.id);
+    await f.control(s.id);
+    await f.control(s.id);
+    await f.control(s.id, "next-exercise");
+    const d = await f.control(s.id);
+    const send = async (body: string, judgment?: boolean) => {
+      const sent = await f.request(
+        "POST",
+        `/sessions/${s.id}/messages`,
+        {
+          body,
+          judgment,
+          revision: d.session.revision,
+          clientId: randomUUID(),
+        },
+        c.cookies[0],
+        202,
+      );
+      const after = await f.waitFor(s.id, f.teacher, (x) =>
+        x.messages.some((m: any) => m.replyTo === sent.id),
+      );
+      return { sent, after };
+    };
+    await send("a=±2不属于1<x<2，应该舍去", false);
+    const { sent, after } = await send("a=1或a=2.5", false);
+    const first = after.participant.judgments["representation-02"];
+    assert.equal(first.status, "achieved");
+    const reply = after.messages.find((m: any) => m.replyTo === sent.id).body;
+    assert.match(reply, /教给我|明白/);
+    assert.doesNotMatch(reply, /[？?]|分别满足/);
+    assert.equal(first.firstAchievedMessageId, sent.id);
+    assert.ok(first.firstAchievedAt);
+    await send("没错");
+    const { after: closed } = await send("你还有别的问题吗");
+    const record = closed.participant.judgments["representation-02"];
+    assert.equal(record.status, "achieved");
+    assert.equal(record.attempts, 4);
+    assert.equal(record.answerAttempts, 2);
+    assert.equal(record.postAchievementMessages, 2);
+    assert.equal(record.firstAchievedAt, first.firstAchievedAt);
+    assert.equal(record.hints, 1);
+    assert.equal(calls, 2);
+    assert.equal(record.evaluationStatus, "evaluated");
+    const response = await fetch(`${f.base}/api/classes/${c.id}/export`, {
+      headers: { Cookie: f.teacher },
+    });
+    const zip = await unzipper.Open.buffer(
+      Buffer.from(await response.arrayBuffer()),
+    );
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(
+      await zip.files.find((x) => x.path === "课堂过程记录.xlsx")!.buffer(),
+    );
+    const sheet = workbook.getWorksheet("任务表现")!;
+    const values = sheet.getRow(1).values as string[];
+    const row = sheet.getRow(3);
+    assert.equal(
+      row.getCell(values.indexOf("有效作答次数（首次达标前）")).value,
+      2,
+    );
+    assert.equal(
+      row.getCell(values.indexOf("首次达标消息编号")).value,
+      sent.id,
+    );
+    assert.equal(row.getCell(values.indexOf("首次达标后提交次数")).value, 2);
+  } finally {
+    await f.close();
+  }
+});
+
 test("学生补充理由后收到针对新回答的追问，第三轮才给明确说明", async () => {
   const replies = [
     "我想知道两个根式的限制要怎样一起考虑。",
@@ -54,6 +146,117 @@ test("学生补充理由后收到针对新回答的追问，第三轮才给明�
         "achieved",
       );
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test("请求澄清不消耗追问次数，新端点问题不继承选段计数", async () => {
+  let turn = 0;
+  const f = await fixture(async (input) => {
+    turn++;
+    const base = await goodEvaluation(input);
+    return {
+      ...base,
+      checks: [],
+      feedback:
+        "我说的是x<0时f(x)=x+1，x≥0时f(x)=x²这个分段函数；x=2要用哪一段？",
+      issue: {
+        key: "function-representation-c2",
+        partId: turn < 4 ? "interval" : "endpoint",
+        kind: "missing",
+        question:
+          turn < 4 ? "x=2时，先看什么来选段？" : "那x=0应该选哪一段，为什么？",
+        correction: "x=0属于带等号的那一段。",
+      },
+    };
+  });
+  try {
+    const c = await f.classroom(1),
+      s = await f.open(c.id, 1);
+    const d = await f.control(s.id);
+    const bodies = [
+      "我先讲列表法",
+      "什么分段函数",
+      "能解释一下吗",
+      "x=2满足x≥0所以用x²",
+    ];
+    for (const [i, body] of bodies.entries()) {
+      const sent = await f.request(
+        "POST",
+        `/sessions/${s.id}/messages`,
+        { body, revision: d.session.revision, clientId: randomUUID() },
+        c.cookies[0],
+        202,
+      );
+      const after = await f.waitFor(s.id, f.teacher, (x) =>
+        x.messages.some((m: any) => m.replyTo === sent.id),
+      );
+      assert.equal(after.participant.explainHints, i === 3 ? 2 : 1);
+      assert.equal(after.participant.explainSupplements, 0);
+      if (i === 1 || i === 2) {
+        assert.match(
+          after.messages.find((m: any) => m.replyTo === sent.id).body,
+          /x<0时/,
+        );
+        assert.equal(
+          after.messages.find((m: any) => m.id === sent.id).evaluation
+            .interaction.kind,
+          "clarification",
+        );
+      }
+      if (i === 3)
+        assert.match(
+          after.messages.find((m: any) => m.replyTo === sent.id).body,
+          /x=0应该选哪一段/,
+        );
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("达标后的反对意见仍需评价，不能当作收尾而忽略新的错误判断", async () => {
+  let calls = 0;
+  const f = await fixture(async (input) => {
+    calls++;
+    return goodEvaluation(input);
+  });
+  try {
+    const c = await f.classroom(1),
+      s = await f.open(c.id, 1);
+    await f.control(s.id);
+    await f.control(s.id);
+    const d = await f.control(s.id);
+    for (const [body, judgment] of [
+      ["每次先确定输入区间再代入，内层算出4，外层算得7", true],
+      ["你做的不对", false],
+    ] as const) {
+      const sent = await f.request(
+        "POST",
+        `/sessions/${s.id}/messages`,
+        {
+          body,
+          judgment,
+          revision: d.session.revision,
+          clientId: randomUUID(),
+        },
+        c.cookies[0],
+        202,
+      );
+      const after = await f.waitFor(s.id, f.teacher, (x) =>
+        x.messages.some((m: any) => m.replyTo === sent.id),
+      );
+      const j = after.participant.judgments["representation-01"];
+      if (judgment) assert.equal(j.status, "achieved");
+      else {
+        assert.notEqual(j.status, "achieved");
+        assert.ok(j.firstAchievedAt, "仍保留首次达标历史");
+        assert.equal(j.answerAttempts, 1);
+        assert.equal(j.postAchievementMessages, 1);
+      }
+    }
+    assert.equal(calls, 2);
   } finally {
     await f.close();
   }

@@ -532,9 +532,27 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
       409,
       "小知正在回应上一条消息，请稍候。",
     );
+    const participant = store.get(
+      "SELECT * FROM participants WHERE session_id=? AND user_id=?",
+      s.id,
+      u.id,
+    )!;
+    const exercise = JSON.parse(s.snapshot).exercises[s.exercise_index];
+    const currentRecord = JSON.parse(participant.judgments)[exercise?.id] || {};
+    const submission = {
+      kind: submissionKind(input.body, input.attachments.length > 0),
+      afterAchievement:
+        s.stage === "judge"
+          ? Boolean(
+              currentRecord.firstAchievedAt ||
+              currentRecord.firstAchievementUnknown ||
+              currentRecord.status === "achieved",
+            )
+          : participant.explain_status === "achieved",
+    };
     if (s.stage === "judge")
       ensure(
-        input.judgment !== undefined,
+        input.judgment !== undefined || currentRecord.status === "achieved",
         400,
         "请选择正确或错误，并说明理由。",
       );
@@ -558,7 +576,7 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
     const messageId = id();
     store.tx(() => {
       store.run(
-        "INSERT INTO messages(id,session_id,user_id,role,body,stage,exercise_index,judgment,created_at,status,client_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO messages(id,session_id,user_id,role,body,stage,exercise_index,judgment,created_at,status,client_id,submission) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         messageId,
         s.id,
         u.id,
@@ -570,6 +588,7 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
         now(),
         "pending",
         input.clientId,
+        JSON.stringify(submission),
       );
       for (const fileId of input.attachments)
         store.run(
@@ -591,10 +610,33 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
         judgments[ex.id] = {
           ...record,
           firstJudgment: record.firstJudgment ?? input.judgment,
-          firstCorrect: record.firstCorrect ?? input.judgment === ex.isCorrect,
+          firstCorrect:
+            record.firstCorrect ??
+            (input.judgment === undefined
+              ? undefined
+              : input.judgment === ex.isCorrect),
           attempts: (record.attempts || 0) + 1,
           status: record.status || "not_started",
           hints: record.hints || 0,
+          answerAttempts:
+            (record.answerAttempts || 0) +
+            (submission.kind === "answer" && !submission.afterAchievement
+              ? 1
+              : 0),
+          clarificationMessages:
+            (record.clarificationMessages || 0) +
+            (submission.kind === "clarification" ? 1 : 0),
+          socialMessages:
+            (record.socialMessages || 0) +
+            (submission.kind === "social" ? 1 : 0),
+          postAchievementMessages:
+            (record.postAchievementMessages || 0) +
+            (submission.afterAchievement ? 1 : 0),
+          statisticsStartedAt: record.statisticsStartedAt || now(),
+          legacyAttempts: record.legacyAttempts ?? record.attempts ?? 0,
+          firstAchievementUnknown:
+            record.firstAchievementUnknown ||
+            (record.status === "achieved" && !record.firstAchievedAt),
         };
         store.run(
           "UPDATE participants SET judgments=? WHERE session_id=? AND user_id=?",
@@ -773,3 +815,4 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
   });
   return { app, store, service };
 }
+import { submissionKind } from "./dialogue.js";

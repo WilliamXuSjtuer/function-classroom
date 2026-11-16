@@ -7,8 +7,13 @@ import type {
 } from "../shared/types.js";
 import { Store, id, now } from "./db.js";
 import type { Config } from "./config.js";
-import { PROMPT_VERSION, type Evaluator } from "./ai.js";
+import { PROMPT_VERSION, type AIResult, type Evaluator } from "./ai.js";
 import { readSupport, explainFeedback } from "./support.js";
+import {
+  completedFeedback,
+  submissionKind,
+  isDisagreement,
+} from "./dialogue.js";
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -101,6 +106,7 @@ export class ClassroomService {
         status: m.status,
         error: m.error,
         replyTo: m.reply_to,
+        submission: m.submission ? JSON.parse(m.submission) : undefined,
         evaluation: m.evaluation ? JSON.parse(m.evaluation) : null,
         attachments: assets
           .filter((a) => a.message_id === m.id)
@@ -116,9 +122,17 @@ export class ClassroomService {
   participants(sessionId: string): Participant[] {
     const latest = new Map<string, Map<string, string>>();
     for (const m of this.store.all(
-      "SELECT user_id,stage,exercise_index,status,evaluation FROM messages WHERE session_id=? AND role='student' ORDER BY created_at,rowid",
+      "SELECT user_id,stage,exercise_index,status,evaluation,submission FROM messages WHERE session_id=? AND role='student' ORDER BY created_at,rowid",
       sessionId,
     )) {
+      // Acknowledging a completed task is not another learning evaluation.
+      if (
+        m.submission &&
+        JSON.parse(m.submission).kind === "social" &&
+        m.evaluation &&
+        JSON.parse(m.evaluation).evaluationSkipped
+      )
+        continue;
       const state =
         m.status === "failed"
           ? "failed"
@@ -282,24 +296,53 @@ export class ClassroomService {
       m.user_id,
     );
     const previous = this.store.get(
-      "SELECT checks,focus,judgments FROM participants WHERE session_id=? AND user_id=?",
+      "SELECT checks,focus,judgments,explain_status FROM participants WHERE session_id=? AND user_id=?",
       s.id,
       m.user_id,
     )!;
-    const result = await this.evaluate({
-      lesson,
-      messages,
-      stage: m.stage,
-      exerciseIndex: m.exercise_index,
-      imageFiles,
-      previousChecks: JSON.parse(previous.checks),
-      support: {
-        explainFocus: readSupport(previous.focus).active,
-        judgeHints:
-          JSON.parse(previous.judgments)[lesson.exercises[m.exercise_index]?.id]
-            ?.hints || 0,
-      },
-    });
+    const kind = m.submission
+      ? JSON.parse(m.submission).kind
+      : submissionKind(
+          m.body,
+          imageFiles.some((f) => f.messageId === m.id),
+        );
+    const priorJudgment = JSON.parse(previous.judgments)[
+      lesson.exercises[m.exercise_index]?.id
+    ];
+    const closing =
+      kind === "social" &&
+      !isDisagreement(m.body) &&
+      (m.stage !== "judge" ||
+        m.judgment === null ||
+        Boolean(m.judgment) === lesson.exercises[m.exercise_index].isCorrect) &&
+      (m.stage === "judge"
+        ? priorJudgment?.status === "achieved"
+        : previous.explain_status === "achieved");
+    const result: AIResult = closing
+      ? {
+          feedback: completedFeedback(m.stage),
+          checks: [],
+          issue: null,
+          reasoningAccepted: false,
+          corrected: false,
+          note: "达标后的收尾交流，未重新评价；保留此前学习状态与评价依据。",
+          modelAttempts: 0,
+        }
+      : await this.evaluate({
+          lesson,
+          messages,
+          stage: m.stage,
+          exerciseIndex: m.exercise_index,
+          imageFiles,
+          previousChecks: JSON.parse(previous.checks),
+          support: {
+            explainFocus: readSupport(previous.focus).active,
+            judgeHints:
+              JSON.parse(previous.judgments)[
+                lesson.exercises[m.exercise_index]?.id
+              ]?.hints || 0,
+          },
+        });
     this.store.tx(() => {
       const current = this.store.get(
         "SELECT * FROM sessions WHERE id=?",
@@ -315,12 +358,16 @@ export class ClassroomService {
       const judgments = JSON.parse(p.judgments);
       let feedback = result.feedback;
       let interaction;
-      if (result.reviewRequired) {
+      let taskPassed: boolean | undefined;
+      const evaluatedAt = now();
+      if (closing) {
+        interaction = { kind: "acknowledge" as const, target: "" };
+      } else if (result.reviewRequired) {
         feedback =
           "我还没核对清楚这次讲解，想请老师一起看一下。你的回答已经保存。";
         interaction = { kind: "review" as const, target: "" };
       } else if (m.stage === "explain") {
-        const response = explainFeedback(result, focus);
+        const response = explainFeedback(result, focus, kind);
         feedback = response.feedback;
         interaction = response.interaction;
         if (!stale)
@@ -341,24 +388,51 @@ export class ClassroomService {
         const ex = lesson.exercises[m.exercise_index];
         const record = judgments[ex.id] || {};
         const passed =
-          Boolean(m.judgment) === ex.isCorrect &&
+          messages
+            .filter(
+              (x) =>
+                x.role === "student" &&
+                x.stage === "judge" &&
+                x.exerciseIndex === m.exercise_index &&
+                x.judgment !== null,
+            )
+            .at(-1)?.judgment === ex.isCorrect &&
           result.reasoningAccepted &&
           (ex.isCorrect || result.corrected);
+        taskPassed = passed;
         const hints = record.hints || 0;
-        if (!passed)
+        const guiding = kind !== "clarification";
+        if (passed) feedback = completedFeedback("judge", !ex.isCorrect);
+        else if (!guiding) feedback = result.feedback;
+        else
           feedback =
             hints < 2
               ? result.feedback || `我还想请你解释一下：${ex.hint}`
               : `我对照材料重新检查了一下：${ex.errorExplanation || "这道题的关键依据如下。"}\n\n${ex.correctAnswer}\n\n你能再用自己的话说明判断依据${ex.isCorrect ? "吗？" : "，并教我怎样修正吗？"}`;
+        interaction = {
+          kind: passed
+            ? ("acknowledge" as const)
+            : kind === "clarification"
+              ? ("clarification" as const)
+              : ("question" as const),
+          target: ex.id,
+        };
         if (!stale) {
           judgments[ex.id] = {
             ...record,
             status: passed
               ? "achieved"
-              : hints >= 2
-                ? "needs_help"
-                : "in_progress",
-            hints: hints + (passed ? 0 : 1),
+              : !guiding
+                ? record.status
+                : hints >= 2
+                  ? "needs_help"
+                  : "in_progress",
+            hints: hints + (!passed && guiding ? 1 : 0),
+            ...(passed &&
+            !record.firstAchievedAt &&
+            !record.firstAchievementUnknown
+              ? { firstAchievedAt: evaluatedAt, firstAchievedMessageId: m.id }
+              : {}),
           };
           this.store.run(
             "UPDATE participants SET judgments=?,checks=? WHERE session_id=? AND user_id=?",
@@ -374,7 +448,11 @@ export class ClassroomService {
         reasoningAccepted: result.reasoningAccepted,
         corrected: result.corrected,
         note: result.note,
-        source: this.config.demo ? "演示反馈（未评价）" : "模型评价",
+        source: closing
+          ? "系统收尾反馈（未重新评价）"
+          : this.config.demo
+            ? "演示反馈（未评价）"
+            : "模型评价",
         model: this.config.model,
         promptVersion: PROMPT_VERSION,
         phaseStale: stale,
@@ -384,6 +462,9 @@ export class ClassroomService {
         validationWarnings: result.validationWarnings,
         reviewRequired: result.reviewRequired,
         modelAttempts: result.modelAttempts,
+        taskPassed,
+        evaluatedAt,
+        evaluationSkipped: closing,
       };
       if (this.config.demo) feedback = result.feedback;
       this.store.run(

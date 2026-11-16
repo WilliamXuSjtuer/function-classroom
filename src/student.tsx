@@ -326,6 +326,12 @@ function Composer({
   const { session } = detail;
   const pending = detail.messages.some((m) => m.status === "pending");
   const allowed = ["explain", "judge"].includes(session.stage);
+  const completed =
+    session.stage === "judge" &&
+    detail.participant.judgments[
+      detail.lesson.exercises[session.exerciseIndex]?.id
+    ]?.status === "achieved";
+  const needsJudgment = session.stage === "judge" && !completed;
   const enabled = allowed && !busy && !pending && detail.aiReady;
   useEffect(() => {
     setJudgment(undefined);
@@ -453,7 +459,7 @@ function Composer({
           )}
           {session.stage === "judge" && (
             <div className="judgment-switch">
-              <span>我的判断</span>
+              <span>{completed ? "本题已完成" : "我的判断"}</span>
               <button
                 className={judgment === true ? "picked" : ""}
                 onClick={() => setJudgment(true)}
@@ -470,7 +476,11 @@ function Composer({
                 <X size={15} />
                 有错误
               </button>
-              <small>两种判断都需要说明理由</small>
+              <small>
+                {completed
+                  ? "等待教师切换；如需补充或修正，仍可发送"
+                  : "两种判断都需要说明理由"}
+              </small>
             </div>
           )}
           <div className="math-toolbar">
@@ -553,7 +563,9 @@ function Composer({
               onChange={(e) => setText(e.target.value)}
               placeholder={
                 session.stage === "judge"
-                  ? "说说判断的依据；如果有错误，请指出并修正…"
+                  ? completed
+                    ? "可以补充说明，也可以等待老师安排下一项任务…"
+                    : "说说判断的依据；如果有错误，请指出并修正…"
                   : "用自己的话讲给小知听，也可以举一个例子…"
               }
               disabled={!enabled}
@@ -563,7 +575,7 @@ function Composer({
                   if (
                     enabled &&
                     !uploading &&
-                    (session.stage !== "judge" || judgment !== undefined)
+                    (!needsJudgment || judgment !== undefined)
                   )
                     send();
                 }
@@ -576,7 +588,7 @@ function Composer({
                 !enabled ||
                 uploading ||
                 (!text.trim() && !images.length) ||
-                (session.stage === "judge" && judgment === undefined)
+                (needsJudgment && judgment === undefined)
               }
               onClick={send}
             >
