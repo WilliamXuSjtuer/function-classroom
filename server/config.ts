@@ -26,7 +26,7 @@ export function configFromEnv(): Config {
     dataDir: path.resolve(process.env.DATA_DIR || "data"),
     port: Number(process.env.PORT || 3001),
     host,
-    origin: process.env.APP_ORIGIN || "http://localhost:5173",
+    origin: process.env.APP_ORIGIN || "http://localhost:5173,http://127.0.0.1:5173",
     secure: process.env.COOKIE_SECURE === "true",
     demo,
     apiKey: process.env.DEEPSEEK_API_KEY || "",
