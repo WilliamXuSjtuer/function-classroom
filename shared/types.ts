@@ -84,7 +84,7 @@ export interface Attachment {
 export type SubmissionKind = "answer" | "clarification" | "social";
 export interface Submission {
   kind: SubmissionKind;
-  afterAchievement: boolean;
+  afterAchievement?: boolean;
 }
 export interface Message {
   id: string;
@@ -123,8 +123,8 @@ export interface CheckPart {
 }
 export interface Evaluation {
   checks: CheckResult[];
-  reasoningAccepted: boolean;
-  corrected: boolean;
+  reasoningAccepted?: boolean;
+  corrected?: boolean;
   note: string;
   source: string;
   model: string;

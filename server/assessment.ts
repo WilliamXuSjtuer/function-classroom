@@ -235,14 +235,21 @@ export function normalizeAssessment(
     (warnings.length
       ? "\n证据核验存在疑问，待复核；不能据此认定学生未掌握。"
       : "");
+  let feedback = raw.feedback;
+  if (input.stage === "judge" && !warnings.length) {
+    if (raw.reasoningAccepted && !reasoningAccepted)
+      feedback =
+        "我还想听懂这道题的依据。你能选一个关键步骤，说明为什么这样做吗？";
+    else if (
+      !input.lesson.exercises[input.exerciseIndex].isCorrect &&
+      raw.corrected &&
+      !corrected
+    )
+      feedback =
+        "你指出的错误原因我听到了，不过还没听到具体的修正。你能把正确的做法或结论教给我吗？";
+  }
   return {
-    feedback:
-      input.stage === "judge" &&
-      raw.reasoningAccepted &&
-      !reasoningAccepted &&
-      !warnings.length
-        ? "我还想听懂这道题的依据。你能选一个关键步骤，说明为什么这样做吗？"
-        : raw.feedback,
+    feedback,
     checks,
     issue,
     reasoningAccepted,

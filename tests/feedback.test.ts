@@ -70,6 +70,12 @@ test("例题通过后明确收尾，保留全部提交并单列有效作答和�
     assert.equal(record.hints, 1);
     assert.equal(calls, 2);
     assert.equal(record.evaluationStatus, "evaluated");
+    const closingEvaluation = closed.messages
+      .filter((m: any) => m.role === "student")
+      .at(-1).evaluation;
+    assert.equal(closingEvaluation.evaluationSkipped, true);
+    assert.equal(closingEvaluation.reasoningAccepted, undefined);
+    assert.equal(closingEvaluation.corrected, undefined);
     const response = await fetch(`${f.base}/api/classes/${c.id}/export`, {
       headers: { Cookie: f.teacher },
     });
@@ -257,6 +263,160 @@ test("达标后的反对意见仍需评价，不能当作收尾而忽略新的�
       }
     }
     assert.equal(calls, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("达标后表达仍有疑问要得到回应，不能强行收尾", async () => {
+  let calls = 0;
+  const f = await fixture(async (input) => ({
+    ...(await goodEvaluation(input)),
+    feedback:
+      ++calls === 1
+        ? "完成"
+        : "你是对选段还是复合求值有疑问？我想听你具体说说。",
+  }));
+  try {
+    const c = await f.classroom(1),
+      s = await f.open(c.id, 1);
+    await f.control(s.id);
+    await f.control(s.id);
+    const d = await f.control(s.id);
+    for (const [i, body] of [
+      "先按区间选段，内层得到4，外层得到7",
+      "还有疑问",
+      "有别的问题",
+    ].entries()) {
+      const sent = await f.request(
+        "POST",
+        `/sessions/${s.id}/messages`,
+        {
+          body,
+          judgment: true,
+          revision: d.session.revision,
+          clientId: randomUUID(),
+        },
+        c.cookies[0],
+        202,
+      );
+      const after = await f.waitFor(s.id, f.teacher, (x) =>
+        x.messages.some((m: any) => m.replyTo === sent.id),
+      );
+      if (i > 0) {
+        assert.equal(calls, i + 1);
+        assert.match(
+          after.messages.find((m: any) => m.replyTo === sent.id).body,
+          /具体说说/,
+        );
+        assert.equal(
+          after.participant.judgments["representation-01"].status,
+          "achieved",
+        );
+        assert.equal(after.participant.judgments["representation-01"].hints, 0);
+      }
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("已达标的旧课堂重试失败消息时，不伪造缺失的首次达标时间", async () => {
+  let fail = false;
+  let accepted = true;
+  const f = await fixture(async (input) => {
+    if (fail) throw Error("模拟旧消息失败");
+    return { ...(await goodEvaluation(input)), reasoningAccepted: accepted };
+  });
+  try {
+    const c = await f.classroom(1),
+      s = await f.open(c.id);
+    await f.control(s.id);
+    await f.control(s.id);
+    const d = await f.control(s.id);
+    const payload = {
+      body: "定义域不同，所以不是同一个函数",
+      judgment: false,
+      revision: d.session.revision,
+    };
+    await f.request(
+      "POST",
+      `/sessions/${s.id}/messages`,
+      { ...payload, clientId: randomUUID() },
+      c.cookies[0],
+      202,
+    );
+    const achieved = await f.waitFor(
+      s.id,
+      f.teacher,
+      (x) => x.participant.judgments["concept-01"]?.status === "achieved",
+    );
+    fail = true;
+    const sent = await f.request(
+      "POST",
+      `/sessions/${s.id}/messages`,
+      { ...payload, clientId: randomUUID() },
+      c.cookies[0],
+      202,
+    );
+    await f.waitFor(s.id, f.teacher, (x) =>
+      x.messages.some((m: any) => m.id === sent.id && m.status === "failed"),
+    );
+    // Seed the exact legacy JSON shape, then exercise only the public retry API.
+    f.store.run(
+      "UPDATE participants SET judgments=? WHERE session_id=? AND user_id=?",
+      JSON.stringify({
+        "concept-01": {
+          firstJudgment: false,
+          firstCorrect: true,
+          attempts: 2,
+          hints: 0,
+          status: "achieved",
+        },
+      }),
+      s.id,
+      achieved.participant.userId,
+    );
+    f.store.run("UPDATE messages SET submission=NULL WHERE session_id=?", s.id);
+    fail = false;
+    accepted = false;
+    await f.request(
+      "POST",
+      `/messages/${sent.id}/retry`,
+      {},
+      c.cookies[0],
+      202,
+    );
+    const retried = await f.waitFor(s.id, f.teacher, (x) =>
+      x.messages.some((m: any) => m.replyTo === sent.id),
+    );
+    const j = retried.participant.judgments["concept-01"];
+    assert.notEqual(j.status, "achieved");
+    assert.equal(j.firstAchievementUnknown, true);
+    assert.equal(j.firstAchievedAt, undefined);
+    assert.equal(j.firstAchievedMessageId, undefined);
+    assert.equal(j.attempts, 2);
+    accepted = true;
+    const next = await f.request(
+      "POST",
+      `/sessions/${s.id}/messages`,
+      { ...payload, clientId: randomUUID() },
+      c.cookies[0],
+      202,
+    );
+    const done = await f.waitFor(s.id, f.teacher, (x) =>
+      x.messages.some((m: any) => m.replyTo === next.id),
+    );
+    assert.equal(done.participant.judgments["concept-01"].status, "achieved");
+    assert.equal(
+      done.participant.judgments["concept-01"].firstAchievedAt,
+      undefined,
+    );
+    assert.equal(
+      done.participant.judgments["concept-01"].firstAchievedMessageId,
+      undefined,
+    );
+    assert.equal(done.participant.judgments["concept-01"].attempts, 3);
   } finally {
     await f.close();
   }

@@ -43,7 +43,7 @@ export async function exportClass(
       "错误信息",
       "图片附件",
       "提交类型",
-      "是否首次达标后提交",
+      "是否例题首次达标后提交",
     ],
     [
       "学号",
@@ -184,7 +184,11 @@ export async function exportClass(
                 m.submission.kind
               ]
             : "",
-          m.submission ? (m.submission.afterAchievement ? "是" : "否") : "",
+          m.submission?.afterAchievement === undefined
+            ? ""
+            : m.submission.afterAchievement
+              ? "是"
+              : "否",
         ]);
         if (m.evaluation) {
           const e = m.evaluation;

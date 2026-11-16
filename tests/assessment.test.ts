@@ -112,6 +112,34 @@ test("纯表态不能充作本题理由，但简短确认不抹去此前有效�
   }
 });
 
+test("错误原因已经说明但修正只有表态时，反馈仍要求补充修正", async () => {
+  const reason = studentMessage(
+    "reason",
+    "这两个函数的定义域不同，所以不能只看式子相同",
+    "judge",
+  );
+  const short = studentMessage("short", "没错", "judge");
+  const f = await modelFixture(() =>
+    rawAssessment({
+      reasoningAccepted: true,
+      corrected: true,
+      reasoningEvidence: [evidence(reason.id, reason.body)],
+      correctionEvidence: [evidence(short.id, short.body)],
+      feedback: "你把修正方法教给我了，这题已完成，等老师切换。",
+    }),
+  );
+  try {
+    const r = await f.evaluate(inputFor([reason, short]));
+    assert.equal(r.reasoningAccepted, true);
+    assert.equal(r.corrected, false);
+    assert.doesNotMatch(r.feedback, /已完成|等老师切换/);
+    assert.match(r.feedback, /修正/);
+    assert.equal(r.reviewRequired, false);
+  } finally {
+    await f.close();
+  }
+});
+
 test("助手解题和其他例题的学生回答不能成为本题通过证据，说明与最终字段保持一致", async () => {
   const f = await modelFixture(() =>
     rawAssessment({

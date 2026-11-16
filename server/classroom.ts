@@ -387,6 +387,9 @@ export class ClassroomService {
       } else if (m.stage === "judge") {
         const ex = lesson.exercises[m.exercise_index];
         const record = judgments[ex.id] || {};
+        const firstAchievementUnknown =
+          record.firstAchievementUnknown ||
+          (record.status === "achieved" && !record.firstAchievedAt);
         const passed =
           messages
             .filter(
@@ -402,24 +405,26 @@ export class ClassroomService {
         taskPassed = passed;
         const hints = record.hints || 0;
         const guiding = kind !== "clarification";
-        if (passed) feedback = completedFeedback("judge", !ex.isCorrect);
-        else if (!guiding) feedback = result.feedback;
+        if (!guiding) feedback = result.feedback;
+        else if (passed) feedback = completedFeedback("judge", !ex.isCorrect);
         else
           feedback =
             hints < 2
               ? result.feedback || `我还想请你解释一下：${ex.hint}`
               : `我对照材料重新检查了一下：${ex.errorExplanation || "这道题的关键依据如下。"}\n\n${ex.correctAnswer}\n\n你能再用自己的话说明判断依据${ex.isCorrect ? "吗？" : "，并教我怎样修正吗？"}`;
         interaction = {
-          kind: passed
-            ? ("acknowledge" as const)
-            : kind === "clarification"
+          kind:
+            kind === "clarification"
               ? ("clarification" as const)
-              : ("question" as const),
+              : passed
+                ? ("acknowledge" as const)
+                : ("question" as const),
           target: ex.id,
         };
         if (!stale) {
           judgments[ex.id] = {
             ...record,
+            firstAchievementUnknown,
             status: passed
               ? "achieved"
               : !guiding
@@ -428,9 +433,7 @@ export class ClassroomService {
                   ? "needs_help"
                   : "in_progress",
             hints: hints + (!passed && guiding ? 1 : 0),
-            ...(passed &&
-            !record.firstAchievedAt &&
-            !record.firstAchievementUnknown
+            ...(passed && !record.firstAchievedAt && !firstAchievementUnknown
               ? { firstAchievedAt: evaluatedAt, firstAchievedMessageId: m.id }
               : {}),
           };
@@ -445,8 +448,12 @@ export class ClassroomService {
       }
       const evaluation = {
         checks: result.checks,
-        reasoningAccepted: result.reasoningAccepted,
-        corrected: result.corrected,
+        ...(closing
+          ? {}
+          : {
+              reasoningAccepted: result.reasoningAccepted,
+              corrected: result.corrected,
+            }),
         note: result.note,
         source: closing
           ? "系统收尾反馈（未重新评价）"

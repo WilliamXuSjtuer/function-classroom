@@ -548,7 +548,7 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
               currentRecord.firstAchievementUnknown ||
               currentRecord.status === "achieved",
             )
-          : participant.explain_status === "achieved",
+          : undefined,
     };
     if (s.stage === "judge")
       ensure(
