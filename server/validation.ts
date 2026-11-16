@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_CRITERIA_PARTS } from "./assessment.js";
 const text = (max = 10000) => z.string().trim().min(1).max(max);
 export const lessonSchema = z
   .object({
@@ -13,7 +14,16 @@ export const lessonSchema = z
     objectives: z.array(text(500)).min(1).max(20),
     checklist: z
       .array(
-        z.object({ id: text(80), label: text(200), criterion: text(1500) }),
+        z.object({
+          id: text(80),
+          label: text(200),
+          criterion: text(1500).refine(
+            (value) =>
+              value.split(/\r?\n/).filter((line) => line.trim()).length <=
+              MAX_CRITERIA_PARTS,
+            `每个检查项最多填写${MAX_CRITERIA_PARTS}行独立审核标准。`,
+          ),
+        }),
       )
       .min(1)
       .max(15),

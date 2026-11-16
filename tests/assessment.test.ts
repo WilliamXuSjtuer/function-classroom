@@ -120,6 +120,17 @@ test("格式失败自动重试一次；连续失败明确说明是系统未能�
   } finally {
     await f.close();
   }
+  const envelope = await modelFixture((_request, n) =>
+    n === 1 ? new Response("invalid outer JSON") : rawAssessment(),
+  );
+  try {
+    const r = await envelope.evaluate(
+      inputFor([studentMessage("a", "我来讲定义域")]),
+    );
+    assert.equal(r.modelAttempts, 2);
+  } finally {
+    await envelope.close();
+  }
   const broken = await modelFixture(() => "not JSON");
   try {
     await assert.rejects(
@@ -184,6 +195,54 @@ test("追问指向已经满足的子项时重新评价，不把过时问题直�
     assert.equal(r.reviewRequired, true);
     assert.equal(f.requests.length, 2);
     assert.equal(r.issue, null);
+  } finally {
+    await f.close();
+  }
+});
+
+test("尚未纠正的旧错误可继续引用，不能借较早的正确原话抹去新错误", async () => {
+  const right = studentMessage("right", "同一个输入只有一个输出");
+  const wrong = studentMessage("wrong", "同一个输入可以有两个输出");
+  const extra = studentMessage("extra", "定义域不能是空集");
+  const f = await modelFixture((_request, n) =>
+    rawAssessment({
+      checks: [
+        {
+          id: "function-concept-c1",
+          parts: [
+            {
+              id: "unique",
+              status: n < 3 ? "incorrect" : "met",
+              evidence: [
+                evidence(
+                  n < 3 ? wrong.id : right.id,
+                  n < 3 ? wrong.body : right.body,
+                ),
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  try {
+    const first = await f.evaluate(inputFor([right, wrong]));
+    const second = await f.evaluate(
+      inputFor([right, wrong, extra], { previousChecks: first.checks }),
+    );
+    assert.equal(second.reviewRequired, false);
+    assert.equal(
+      second.checks[0].parts?.find((p) => p.id === "unique")?.status,
+      "incorrect",
+    );
+    const third = await f.evaluate(
+      inputFor([right, wrong, extra], { previousChecks: second.checks }),
+    );
+    assert.equal(third.reviewRequired, true);
+    assert.equal(
+      third.checks[0].parts?.find((p) => p.id === "unique")?.status,
+      "incorrect",
+    );
   } finally {
     await f.close();
   }

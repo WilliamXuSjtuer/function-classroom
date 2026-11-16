@@ -237,3 +237,96 @@ test("正确但不完整的讲解补充条件，不计为明确纠错；不同�
     await f.close();
   }
 });
+
+test("已达标后补充回答遇到系统失败或待复核，不撤销此前达标状态", async () => {
+  const f = await fixture(async (input) => {
+    const body = input.messages
+      .filter((m) => m.role === "student")
+      .at(-1)!.body;
+    if (body === "补充系统失败") throw Error("系统未能评价");
+    return {
+      ...(await goodEvaluation(input)),
+      reviewRequired: body === "补充等待复核",
+    };
+  });
+  try {
+    const c = await f.classroom(1);
+    const s = await f.open(c.id);
+    let d = await f.control(s.id);
+    for (let stageIndex = 0; stageIndex < 3; stageIndex++) {
+      if (stageIndex === 1) {
+        await f.control(s.id);
+        d = await f.control(s.id);
+      }
+      if (stageIndex === 2) {
+        await f.control(s.id, "next-exercise");
+        d = await f.control(s.id);
+      }
+      for (const body of ["正确且完整的解释", "补充等待复核", "补充系统失败"]) {
+        const sent = await f.request(
+          "POST",
+          `/sessions/${s.id}/messages`,
+          {
+            body,
+            revision: d.session.revision,
+            clientId: randomUUID(),
+            ...(stageIndex
+              ? { judgment: s.lesson.exercises[stageIndex - 1].isCorrect }
+              : {}),
+          },
+          c.cookies[0],
+          202,
+        );
+        const after = await f.waitFor(s.id, f.teacher, (x) =>
+          x.messages.some(
+            (m: any) => m.id === sent.id && m.status !== "pending",
+          ),
+        );
+        const state = stageIndex
+          ? after.participant.judgments[s.lesson.exercises[stageIndex - 1].id]
+              .status
+          : after.participant.explainStatus;
+        assert.equal(state, "achieved", `${d.session.stage}: ${body}`);
+      }
+    }
+    const end = await f.control(s.id, "end");
+    assert.equal(end.participant.pending, false);
+    assert.equal(end.participant.evaluationFailures, 3);
+  } finally {
+    await f.close();
+  }
+});
+
+test("教师保存超过20条的单项细分标准时获得明确提示", async () => {
+  const f = await fixture();
+  try {
+    const boot = await f.request("GET", "/bootstrap", undefined, f.teacher);
+    const lesson = boot.lessons[0];
+    const rejected = await f.request(
+      "PUT",
+      `/lessons/${lesson.id}`,
+      {
+        revision: lesson.revision,
+        lesson: {
+          ...lesson,
+          checklist: lesson.checklist.map((c: any, i: number) =>
+            i
+              ? c
+              : {
+                  ...c,
+                  criterion: Array.from(
+                    { length: 21 },
+                    (_, i) => `条件${i + 1}`,
+                  ).join("\n"),
+                },
+          ),
+        },
+      },
+      f.teacher,
+      400,
+    );
+    assert.match(JSON.stringify(rejected), /20/);
+  } finally {
+    await f.close();
+  }
+});

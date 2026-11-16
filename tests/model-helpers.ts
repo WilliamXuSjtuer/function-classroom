@@ -54,6 +54,11 @@ export async function modelFixture(
     const request = JSON.parse(body);
     requests.push(request);
     const value = respond(request, requests.length);
+    if (value instanceof Response) {
+      res.statusCode = value.status;
+      res.end(await value.text());
+      return;
+    }
     res.setHeader("Content-Type", "application/json");
     res.end(
       JSON.stringify({

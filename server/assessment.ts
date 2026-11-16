@@ -31,17 +31,26 @@ const conceptParts: Record<string, Array<[string, string]>> = {
     ["rule", "比较函数时考虑对应规则而不只看式子外观"],
   ],
 };
+export const MAX_CRITERIA_PARTS = 20;
+function partsFor(criterion: string): Array<[string, string]> {
+  if (Object.hasOwn(conceptParts, criterion)) return conceptParts[criterion];
+  const lines = criterion
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Old published snapshots may predate the limit. Keep their entire criterion
+  // as one item instead of silently dropping lines or failing every response.
+  return (lines.length > MAX_CRITERIA_PARTS ? [criterion] : lines).map(
+    (text, i) => [`criterion-${i + 1}`, text],
+  );
+}
 export function rubricFor(checklist: Checklist[]) {
   return checklist.map((c) => ({
     ...c,
-    parts: (
-      conceptParts[c.criterion?.trim() || ""] ||
-      (c.criterion || c.label)
-        .split(/\r?\n/)
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map((text, i) => [`criterion-${i + 1}`, text])
-    ).map(([id, criterion]) => ({ id, criterion })),
+    parts: partsFor((c.criterion || c.label).trim()).map(([id, criterion]) => ({
+      id,
+      criterion,
+    })),
   }));
 }
 const evidenceSchema = z.object({
@@ -63,7 +72,7 @@ export const assessmentSchema = z.object({
               evidence: z.array(evidenceSchema).max(8),
             }),
           )
-          .max(20),
+          .max(MAX_CRITERIA_PARTS),
       }),
     )
     .max(15),
@@ -141,7 +150,14 @@ export function normalizeAssessment(
       if (!next || next.status === "missing") return kept;
       let refs = next.evidence.filter(valid);
       if (next.status === "incorrect")
-        refs = refs.filter((r) => r.messageId === latest.id);
+        refs = refs.filter(
+          (r) =>
+            r.messageId === latest.id ||
+            (kept.status === "incorrect" &&
+              kept.evidence.some(
+                (old) => JSON.stringify(old) === JSON.stringify(r),
+              )),
+        );
       if (next.status === "met" && kept.status === "incorrect") {
         const lastError = Math.max(
           ...kept.evidence.map((r) => positions.get(r.messageId) ?? -1),

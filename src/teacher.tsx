@@ -1043,7 +1043,7 @@ function LessonStudio({
               讲解检查项 <span className="count">{edit.checklist.length}</span>
             </h3>
             <p className="muted small">
-              标准仅供教师与评价器使用，学生只看到检查项名称。
+              标准仅供教师与评价器使用，学生只看到检查项名称。可每行写一个独立要点，每项最多20行。
             </p>
             {edit.checklist.map((c, i) => (
               <div className="rubric-editor" key={c.id}>

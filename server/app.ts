@@ -577,13 +577,9 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
           messageId,
           fileId,
         );
-      if (s.stage === "explain")
-        store.run(
-          "UPDATE participants SET explain_status='in_progress' WHERE session_id=? AND user_id=?",
-          s.id,
-          u.id,
-        );
-      else {
+      // Receiving an answer changes processing state, not the last verified
+      // learning outcome. Failed or unverified evaluations must not erase it.
+      if (s.stage === "judge") {
         const p = store.get(
           "SELECT judgments FROM participants WHERE session_id=? AND user_id=?",
           s.id,
@@ -597,7 +593,7 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
           firstJudgment: record.firstJudgment ?? input.judgment,
           firstCorrect: record.firstCorrect ?? input.judgment === ex.isCorrect,
           attempts: (record.attempts || 0) + 1,
-          status: "in_progress",
+          status: record.status || "not_started",
           hints: record.hints || 0,
         };
         store.run(

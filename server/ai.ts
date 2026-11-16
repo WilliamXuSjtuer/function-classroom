@@ -200,9 +200,9 @@ JSON 结构示例（使用任务中的实际 id）：{"feedback":"你讲的唯�
               ? "模型服务繁忙，你的消息已保存，可以稍后重试。"
               : `模型服务暂不可用（${response.status}），消息已保存。`,
           );
-        const data = (await response.json()) as any;
         let parsed;
         try {
+          const data = (await response.json()) as any;
           parsed = assessmentSchema.parse(
             JSON.parse(data.choices?.[0]?.message?.content || ""),
           );
