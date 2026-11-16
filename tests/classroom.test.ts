@@ -294,7 +294,7 @@ test("幂等提交、跨学生图片隔离和真实导出附件", async () => {
     await workbook.xlsx.load(await workbookEntry.buffer());
     assert.deepEqual(
       workbook.worksheets.map((s) => s.name),
-      ["原始对话", "任务表现", "评价依据", "课堂事件"],
+      ["原始对话", "任务表现", "评价依据", "课堂事件", "细项证据"],
     );
     assert.equal(
       workbook.getWorksheet("原始对话")!.getCell("A2").value,

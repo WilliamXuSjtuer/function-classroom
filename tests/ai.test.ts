@@ -20,6 +20,10 @@ test("DeepSeek 请求保留早期证据、传入图片并剔除无依据评价�
   const lesson = JSON.parse(
     readFileSync("server/content/lessons.json", "utf8"),
   )[0];
+  // A simple teacher-authored criterion isolates the image/history contract.
+  lesson.checklist.forEach((c: any) => {
+    c.criterion = "解释定义域";
+  });
   const server = createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
@@ -34,14 +38,26 @@ test("DeepSeek 请求保留早期证据、传入图片并剔除无依据评价�
                 feedback: "请继续解释。",
                 checks: lesson.checklist.map((c: any, i: number) => ({
                   id: c.id,
-                  met: true,
-                  evidenceMessageId: i === 0 ? "early" : "invented",
-                  quote: "定义域",
+                  parts: [
+                    {
+                      id: "criterion-1",
+                      status: "met",
+                      evidence: [
+                        {
+                          messageId: i === 0 ? "early" : "invented",
+                          quote: "定义域",
+                          kind: "text",
+                        },
+                      ],
+                    },
+                  ],
                 })),
                 issue: null,
                 reasoningAccepted: true,
                 corrected: false,
                 note: "检查引用",
+                reasoningEvidence: [],
+                correctionEvidence: [],
               }),
             },
           },

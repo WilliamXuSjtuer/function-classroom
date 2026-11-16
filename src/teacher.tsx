@@ -37,6 +37,7 @@ import {
   Rich,
   Status,
   Steps,
+  taskStatus,
 } from "./components";
 interface Props {
   boot: Bootstrap;
@@ -292,6 +293,8 @@ function Live({
   const help = students.filter(
     (p) =>
       p.explainStatus === "needs_help" ||
+      p.evaluationFailures ||
+      p.needsReview ||
       Object.values(p.judgments).some((j) => j.status === "needs_help"),
   ).length;
   return (
@@ -467,7 +470,15 @@ function Live({
                         <small>{p.username}</small>
                       </div>
                     </div>
-                    <Status value={p.explainStatus} />
+                    <Status
+                      value={taskStatus(
+                        p.explainStatus,
+                        p.explainEvaluationStatus,
+                      )}
+                    />
+                    {(Boolean(p.evaluationFailures) || p.needsReview) && (
+                      <small>有系统评价需复核</small>
+                    )}
                     <span className="student-message-count">
                       {p.messageCount} 次讲解{p.pending ? " · 有待补任务" : ""}
                     </span>
@@ -576,16 +587,47 @@ function TeacherTranscript({ detail }: { detail: SessionDetail }) {
                   </b>
                   <p>{m.evaluation?.note}</p>
                   {m.evaluation?.checks.map((c) => (
-                    <p key={c.id}>
-                      <Badge tone={c.met ? "green" : "gray"}>
-                        {c.met ? "满足" : "待补充"}
-                      </Badge>{" "}
-                      {
-                        detail.lesson.checklist.find((item) => item.id === c.id)
-                          ?.label
-                      }
-                      {c.quote && <span> · “{c.quote}”</span>}
-                    </p>
+                    <div key={c.id}>
+                      <p>
+                        <Badge tone={c.met ? "green" : "gray"}>
+                          {c.met ? "满足" : "待补充"}
+                        </Badge>{" "}
+                        {
+                          detail.lesson.checklist.find(
+                            (item) => item.id === c.id,
+                          )?.label
+                        }
+                        {c.quote && <span> · “{c.quote}”</span>}
+                      </p>
+                      {c.parts && (
+                        <details>
+                          <summary>查看细项与学生证据</summary>
+                          {c.parts.map((part) => (
+                            <p key={part.id}>
+                              <b>{part.label}</b>：
+                              {
+                                {
+                                  met: "已满足",
+                                  missing: "尚待补充",
+                                  incorrect: "需修正",
+                                  unverified: "待复核",
+                                }[part.status]
+                              }
+                              {part.evidence.map((ref, i) => (
+                                <small key={i}>
+                                  {" "}
+                                  ·{" "}
+                                  {ref.kind === "image"
+                                    ? "图像观察"
+                                    : "学生原话"}
+                                  ：“{ref.quote}”
+                                </small>
+                              ))}
+                            </p>
+                          ))}
+                        </details>
+                      )}
+                    </div>
                   ))}
                   <small>
                     模型：{m.evaluation?.model} · 提示词：
@@ -1310,7 +1352,10 @@ function Records({
             <>
               <div className="record-summary">
                 <Status
-                  value={detail.participant?.explainStatus || "not_started"}
+                  value={taskStatus(
+                    detail.participant?.explainStatus || "not_started",
+                    detail.participant?.explainEvaluationStatus,
+                  )}
                 />
                 <span>{detail.participant?.messageCount || 0} 次讲解</span>
                 <span>

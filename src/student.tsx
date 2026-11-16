@@ -26,6 +26,7 @@ import {
   Steps,
   Status,
   statusLabels,
+  taskStatus,
 } from "./components";
 export function Student({
   boot,
@@ -201,7 +202,10 @@ export function Student({
                 <h3>我的讲解进度</h3>
                 <div className="student-progress-status">
                   <Status
-                    value={detail.participant?.explainStatus || "not_started"}
+                    value={taskStatus(
+                      detail.participant?.explainStatus || "not_started",
+                      detail.participant?.explainEvaluationStatus,
+                    )}
                   />
                   {detail.participant?.pending && (
                     <Badge tone="amber">有待补任务</Badge>
@@ -214,9 +218,11 @@ export function Student({
                 <div className="student-task-status">
                   <h3>例题完成情况</h3>
                   {detail.lesson.exercises.map((ex) => {
-                    const state =
-                      detail.participant?.judgments[ex.id]?.status ||
-                      "not_started";
+                    const judgment = detail.participant?.judgments[ex.id];
+                    const state = taskStatus(
+                      judgment?.status || "not_started",
+                      judgment?.evaluationStatus,
+                    );
                     return (
                       <div key={ex.id}>
                         <span>{ex.title}</span>

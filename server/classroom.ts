@@ -8,6 +8,7 @@ import type {
 import { Store, id, now } from "./db.js";
 import type { Config } from "./config.js";
 import { PROMPT_VERSION, type Evaluator } from "./ai.js";
+import { readSupport, explainFeedback } from "./support.js";
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -113,29 +114,63 @@ export class ClassroomService {
       }));
   }
   participants(sessionId: string): Participant[] {
+    const latest = new Map<string, Map<string, string>>();
+    for (const m of this.store.all(
+      "SELECT user_id,stage,exercise_index,status,evaluation FROM messages WHERE session_id=? AND role='student' ORDER BY created_at,rowid",
+      sessionId,
+    )) {
+      const state =
+        m.status === "failed"
+          ? "failed"
+          : m.status === "pending"
+            ? "processing"
+            : m.evaluation && JSON.parse(m.evaluation).reviewRequired
+              ? "review"
+              : "evaluated";
+      const tasks = latest.get(m.user_id) || new Map<string, string>();
+      tasks.set(
+        m.stage === "explain" ? "explain" : `judge:${m.exercise_index}`,
+        state,
+      );
+      latest.set(m.user_id, tasks);
+    }
+    const snapshot = this.store.get(
+      "SELECT snapshot FROM sessions WHERE id=?",
+      sessionId,
+    );
+    const lesson = snapshot ? (JSON.parse(snapshot.snapshot) as Lesson) : null;
     return this.store
       .all(
         `SELECT p.*,u.username,u.name,(SELECT count(*) FROM messages m WHERE m.session_id=p.session_id AND m.user_id=p.user_id AND m.role='student') AS message_count,(SELECT max(created_at) FROM messages m WHERE m.session_id=p.session_id AND m.user_id=p.user_id) AS last_activity FROM participants p JOIN users u ON u.id=p.user_id WHERE p.session_id=? ORDER BY u.username`,
         sessionId,
       )
-      .map((p) => ({
-        userId: p.user_id,
-        username: p.username,
-        name: p.name,
-        explainStatus: p.explain_status,
-        checks: JSON.parse(p.checks),
-        judgments: JSON.parse(p.judgments),
-        pending: Boolean(p.pending),
-        messageCount: p.message_count,
-        explainHints: (Object.values(JSON.parse(p.focus)) as number[]).reduce(
-          (sum, n) => sum + Math.min(n, 2),
-          0,
-        ),
-        explainCorrections: (
-          Object.values(JSON.parse(p.focus)) as number[]
-        ).reduce((sum, n) => sum + Math.max(n - 2, 0), 0),
-        lastActivity: p.last_activity,
-      }));
+      .map((p) => {
+        const states = latest.get(p.user_id) || new Map<string, string>();
+        const judgments = JSON.parse(p.judgments);
+        lesson?.exercises.forEach((ex, i) => {
+          if (judgments[ex.id])
+            judgments[ex.id].evaluationStatus =
+              states.get(`judge:${i}`) || "not_submitted";
+        });
+        return {
+          userId: p.user_id,
+          username: p.username,
+          name: p.name,
+          explainStatus: p.explain_status,
+          explainEvaluationStatus: states.get("explain") || "not_submitted",
+          checks: JSON.parse(p.checks),
+          judgments,
+          pending: Boolean(p.pending),
+          messageCount: p.message_count,
+          explainHints: readSupport(p.focus).questions,
+          explainCorrections: readSupport(p.focus).corrections,
+          explainSupplements: readSupport(p.focus).supplements,
+          evaluationFailures: [...states.values()].filter((s) => s === "failed")
+            .length,
+          needsReview: [...states.values()].includes("review"),
+          lastActivity: p.last_activity,
+        };
+      });
   }
   detail(user: User, sessionId: string, target?: string) {
     const s = this.session(user, sessionId);
@@ -247,7 +282,7 @@ export class ClassroomService {
       m.user_id,
     );
     const previous = this.store.get(
-      "SELECT checks FROM participants WHERE session_id=? AND user_id=?",
+      "SELECT checks,focus,judgments FROM participants WHERE session_id=? AND user_id=?",
       s.id,
       m.user_id,
     )!;
@@ -258,6 +293,12 @@ export class ClassroomService {
       exerciseIndex: m.exercise_index,
       imageFiles,
       previousChecks: JSON.parse(previous.checks),
+      support: {
+        explainFocus: readSupport(previous.focus).active,
+        judgeHints:
+          JSON.parse(previous.judgments)[lesson.exercises[m.exercise_index]?.id]
+            ?.hints || 0,
+      },
     });
     this.store.tx(() => {
       const current = this.store.get(
@@ -270,18 +311,18 @@ export class ClassroomService {
         s.id,
         m.user_id,
       )!;
-      const focus = JSON.parse(p.focus);
+      const focus = readSupport(p.focus);
       const judgments = JSON.parse(p.judgments);
       let feedback = result.feedback;
-      if (m.stage === "explain") {
-        if (result.issue) {
-          const count = focus[result.issue.key] || 0;
-          feedback =
-            count < 2
-              ? result.issue.question
-              : `我发现这里需要改一下：${result.issue.correction}\n\n你能再用自己的话教我一遍吗？`;
-          focus[result.issue.key] = count + 1;
-        }
+      let interaction;
+      if (result.reviewRequired) {
+        feedback =
+          "我还没核对清楚这次讲解，想请老师一起看一下。你的回答已经保存。";
+        interaction = { kind: "review" as const, target: "" };
+      } else if (m.stage === "explain") {
+        const response = explainFeedback(result, focus);
+        feedback = response.feedback;
+        interaction = response.interaction;
         if (!stale)
           this.store.run(
             "UPDATE participants SET checks=?,explain_status=?,focus=? WHERE session_id=? AND user_id=?",
@@ -289,7 +330,7 @@ export class ClassroomService {
             result.checks.length === lesson.checklist.length &&
               result.checks.every((c) => c.met)
               ? "achieved"
-              : Object.values(focus).some((n: any) => n > 2)
+              : Object.values(focus.active).some((n) => n > 2)
                 ? "needs_help"
                 : "in_progress",
             JSON.stringify(focus),
@@ -307,7 +348,7 @@ export class ClassroomService {
         if (!passed)
           feedback =
             hints < 2
-              ? `我还没完全听明白。${ex.hint}\n\n请你说明判断的依据${ex.isCorrect ? "，再帮我检查一遍。" : "，并把需要修改的地方写出来。"}`
+              ? result.feedback || `我还想请你解释一下：${ex.hint}`
               : `我对照材料重新检查了一下：${ex.errorExplanation || "这道题的关键依据如下。"}\n\n${ex.correctAnswer}\n\n你能再用自己的话说明判断依据${ex.isCorrect ? "吗？" : "，并教我怎样修正吗？"}`;
         if (!stale) {
           judgments[ex.id] = {
@@ -320,8 +361,9 @@ export class ClassroomService {
             hints: hints + (passed ? 0 : 1),
           };
           this.store.run(
-            "UPDATE participants SET judgments=? WHERE session_id=? AND user_id=?",
+            "UPDATE participants SET judgments=?,checks=? WHERE session_id=? AND user_id=?",
             JSON.stringify(judgments),
+            JSON.stringify(result.checks),
             s.id,
             m.user_id,
           );
@@ -336,6 +378,12 @@ export class ClassroomService {
         model: this.config.model,
         promptVersion: PROMPT_VERSION,
         phaseStale: stale,
+        interaction,
+        reasoningEvidence: result.reasoningEvidence,
+        correctionEvidence: result.correctionEvidence,
+        validationWarnings: result.validationWarnings,
+        reviewRequired: result.reviewRequired,
+        modelAttempts: result.modelAttempts,
       };
       if (this.config.demo) feedback = result.feedback;
       this.store.run(

@@ -167,16 +167,25 @@ export const statusLabels: Record<string, string> = {
   achieved: "讲解达标",
   needs_help: "需要帮助",
   pending: "待补",
+  evaluation_failed: "系统未能评价",
+  needs_review: "待教师复核",
 };
+export function taskStatus(learningStatus: string, evaluationStatus?: string) {
+  return evaluationStatus === "failed"
+    ? "evaluation_failed"
+    : evaluationStatus === "review"
+      ? "needs_review"
+      : learningStatus;
+}
 export function Status({ value }: { value: string }) {
   return (
     <Badge
       tone={
         value === "achieved"
           ? "green"
-          : value === "needs_help"
+          : value === "needs_help" || value === "evaluation_failed"
             ? "red"
-            : value === "pending"
+            : value === "pending" || value === "needs_review"
               ? "amber"
               : "gray"
       }

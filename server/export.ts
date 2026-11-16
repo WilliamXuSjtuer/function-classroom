@@ -20,6 +20,7 @@ export async function exportClass(
   const performances = workbook.addWorksheet("任务表现");
   const evidence = workbook.addWorksheet("评价依据");
   const events = workbook.addWorksheet("课堂事件");
+  const parts = workbook.addWorksheet("细项证据");
   const headers = [
     [
       "学号",
@@ -60,6 +61,9 @@ export async function exportClass(
       "任务状态",
       "讲解追问次数",
       "讲解明确纠错次数",
+      "讲解补充说明次数",
+      "讲解评价状态",
+      "本题评价状态",
     ],
     [
       "学号",
@@ -80,14 +84,36 @@ export async function exportClass(
       "响应时阶段是否已切换",
       "检查项名称",
       "审核标准",
+      "判断理由证据",
+      "修正证据",
+      "是否需复核",
+      "证据核验说明",
+      "模型请求次数",
+      "反馈类型",
     ],
     ["课堂编号", "时间（UTC）", "操作者编号", "事件", "详情"],
+    [
+      "学号",
+      "姓名",
+      "课堂编号",
+      "消息编号",
+      "检查项",
+      "子项编号",
+      "子项标准",
+      "子项状态",
+      "证据消息编号",
+      "证据类型",
+      "学生原话或图像观察",
+      "提示词版本",
+      "响应时阶段是否已切换",
+    ],
   ];
   for (const [index, sheet] of [
     conversations,
     performances,
     evidence,
     events,
+    parts,
   ].entries()) {
     sheet.addRow(headers[index]);
     sheet.views = [{ state: "frozen", ySplit: 1 }];
@@ -166,7 +192,36 @@ export async function exportClass(
               lesson.checklist.find((c: any) => c.id === check.id)?.label || "",
               lesson.checklist.find((c: any) => c.id === check.id)?.criterion ||
                 "",
+              JSON.stringify(e.reasoningEvidence || []),
+              JSON.stringify(e.correctionEvidence || []),
+              e.reviewRequired ? "是" : "否",
+              (e.validationWarnings || []).join("\n"),
+              e.modelAttempts ?? "",
+              e.interaction?.kind || "",
             ]);
+          for (const check of e.checks)
+            for (const part of check.parts || [])
+              for (const ref of part.evidence.length ? part.evidence : [null])
+                parts.addRow([
+                  p.username,
+                  p.name,
+                  s.id,
+                  m.id,
+                  check.id,
+                  part.id,
+                  part.label,
+                  {
+                    met: "已满足",
+                    missing: "待补充",
+                    incorrect: "需修正",
+                    unverified: "待复核",
+                  }[part.status],
+                  ref?.messageId || "",
+                  ref?.kind || "",
+                  ref?.quote || "",
+                  e.promptVersion,
+                  e.phaseStale ? "是" : "否",
+                ]);
         }
       }
       for (const ex of lesson.exercises) {
@@ -193,6 +248,9 @@ export async function exportClass(
           j?.status || "not_started",
           p.explainHints,
           p.explainCorrections,
+          p.explainSupplements || 0,
+          p.explainEvaluationStatus || "not_submitted",
+          j?.evaluationStatus || "not_submitted",
         ]);
       }
     }
@@ -222,7 +280,7 @@ export async function exportClass(
   archive.pipe(res);
   archive.append(xlsx, { name: "课堂过程记录.xlsx" });
   archive.append(
-    "原始对话、任务表现、评价依据与课堂事件保存在 Excel 中。images 目录中的文件与“图片附件”列对应。时间采用 UTC。模型评价需结合原始记录复核；前后测成绩在系统外管理。\n",
+    "原始对话、任务表现、评价依据、细项证据与课堂事件保存在 Excel 中。images 目录中的文件与“图片附件”列对应。时间采用 UTC。模型评价需结合原始记录复核；前后测成绩在系统外管理。\n评价状态：not_submitted=尚未提交，processing=评价中，evaluated=已评价，failed=系统未能评价，review=证据待教师复核。系统失败、待复核和任务待补均不能直接解释为学生未掌握。讲解补充说明与明确纠错分别计数。历史评价保留原提示词版本，不用新版规则改写旧记录。\n",
     { name: "说明.txt" },
   );
   for (const a of new Map(attachments.map((a) => [a.id, a])).values())

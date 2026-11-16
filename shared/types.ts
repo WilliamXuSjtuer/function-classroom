@@ -102,6 +102,18 @@ export interface CheckResult {
   evidenceMessageId: string | null;
   quote: string;
   evidenceKind?: "text" | "image";
+  parts?: CheckPart[];
+}
+export interface EvidenceRef {
+  messageId: string;
+  quote: string;
+  kind: "text" | "image";
+}
+export interface CheckPart {
+  id: string;
+  label: string;
+  status: "met" | "missing" | "incorrect" | "unverified";
+  evidence: EvidenceRef[];
 }
 export interface Evaluation {
   checks: CheckResult[];
@@ -112,12 +124,22 @@ export interface Evaluation {
   model: string;
   promptVersion: string;
   phaseStale?: boolean;
+  reasoningEvidence?: EvidenceRef[];
+  correctionEvidence?: EvidenceRef[];
+  validationWarnings?: string[];
+  reviewRequired?: boolean;
+  modelAttempts?: number;
+  interaction?: {
+    kind: "question" | "supplement" | "correction" | "acknowledge" | "review";
+    target: string;
+  };
 }
 export interface Participant {
   userId: string;
   username: string;
   name: string;
   explainStatus: string;
+  explainEvaluationStatus?: string;
   checks: CheckResult[];
   judgments: Record<
     string,
@@ -127,12 +149,16 @@ export interface Participant {
       attempts: number;
       status: string;
       hints: number;
+      evaluationStatus?: string;
     }
   >;
   pending: boolean;
   messageCount: number;
   explainHints: number;
   explainCorrections: number;
+  explainSupplements?: number;
+  evaluationFailures?: number;
+  needsReview?: boolean;
   lastActivity: string | null;
 }
 export interface SessionDetail {

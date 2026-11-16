@@ -408,8 +408,14 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
       String(req.params.id),
       typeof req.query.student === "string" ? req.query.student : undefined,
     );
-    if (user(req).role === "student")
+    if (user(req).role === "student") {
       result.messages = result.messages.map(({ evaluation, ...m }) => m);
+      // Atomic criteria are teacher-only, just like the original rubric.
+      if (result.participant)
+        result.participant.checks = result.participant.checks.map(
+          ({ parts, ...c }) => c,
+        );
+    }
     res.json(result);
   });
   app.post("/api/sessions/:id/control", (req, res) => {
