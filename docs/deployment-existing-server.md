@@ -62,6 +62,40 @@ sudo docker compose -f compose.existing-proxy.yaml exec app node dist-server/ser
 
 若出现 `permission denied ... /var/run/docker.sock`，说明当前用户无法访问 Docker 守护进程；用上面的 `sudo` 命令继续操作。`config --quiet` 不连接守护进程，其通过不代表有权限启动容器。此时健康检查的 `Connection refused` 是容器尚未启动的结果，无需调整域名或安全组。若 `sudo docker info` 仍报错，先处理其具体错误，再执行构建。Docker权限说明见[官方Linux安装后步骤](https://docs.docker.com/engine/install/linux-postinstall/)。
 
+### 基础镜像拉取超时
+
+如果构建在 `load metadata for docker.io/library/node:22-bookworm-slim` 阶段报 `i/o timeout` 或 `DeadlineExceeded`，失败发生在下载基础镜像时，尚未运行应用的构建命令。
+
+先测试服务器能否拉取 [Docker官方发布在Amazon ECR的Node镜像](https://gallery.ecr.aws/docker/library/node)：
+
+```bash
+sudo docker pull public.ecr.aws/docker/library/node:22-bookworm-slim
+```
+
+拉取成功后，更新项目代码，并在已有 `.env` 中添加或修改下面这一行，保留原来的域名和密钥配置：
+
+```bash
+git pull --ff-only
+nano .env
+```
+
+```dotenv
+NODE_IMAGE=public.ecr.aws/docker/library/node:22-bookworm-slim
+```
+
+然后重新构建、启动和检查：
+
+```bash
+sudo docker compose -f compose.existing-proxy.yaml config --quiet
+sudo docker compose -f compose.existing-proxy.yaml up -d --build
+sudo docker compose -f compose.existing-proxy.yaml ps
+curl --fail --retry 10 --retry-connrefused --retry-delay 2 http://127.0.0.1:1116/api/health
+```
+
+`NODE_IMAGE` 同时用于构建阶段和运行阶段，只影响本项目；无需重启 Docker 守护进程或修改全局镜像源。默认仍使用 `node:22-bookworm-slim`。在当前验证环境已确认上述 ECR 标签可读取（HTTP 200），这不代表目标阿里云服务器的网络已验证；以服务器实际拉取结果为准。
+
+若 ECR 地址也超时，保留其完整错误输出，下一步使用已有可信 ACR 镜像仓库，或在可访问镜像源的机器上构建并导入镜像。不要仅为此项目直接覆盖已有 `/etc/docker/daemon.json` 或重启承载其他服务的 Docker。[阿里云官方说明](https://help.aliyun.com/zh/acr/user-guide/accelerate-the-pulls-of-docker-official-images)指出旧镜像加速器已停止同步最新镜像，不能保证获取指定版本。
+
 ### 2. 解析子域名、接入现有网关
 
 将 `classroom.william-ash.com` 的 A 记录解析到该服务器公网 IPv4。若配置 AAAA 记录，也应指向实际可达的同一服务。根域名与其他子域名保持原用途。

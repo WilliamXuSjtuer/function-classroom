@@ -1,11 +1,12 @@
-FROM node:22-bookworm-slim AS builder
+ARG NODE_IMAGE=node:22-bookworm-slim
+FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run typecheck && npm run build && npm prune --omit=dev
 
-FROM node:22-bookworm-slim AS runner
+FROM ${NODE_IMAGE} AS runner
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3001 DATA_DIR=/app/data
 WORKDIR /app
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules

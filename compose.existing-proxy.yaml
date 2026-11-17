@@ -4,7 +4,10 @@ name: function-classroom
 
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
     restart: unless-stopped
     environment:
       NODE_ENV: production
