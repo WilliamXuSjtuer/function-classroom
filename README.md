@@ -78,6 +78,8 @@ npm start
 
 已提供 Dockerfile、Compose、Caddy HTTPS 配置和数据库备份脚本。按[阿里云部署说明](./docs/deployment-aliyun.md)配置服务器、域名及服务端密钥。当前没有使用任何云端凭据，也没有实际部署到阿里云。
 
+服务器已有其他网站时，使用[已有服务器部署说明](./docs/deployment-existing-server.md)：应用默认监听宿主机 `127.0.0.1:1116`，通过现有 Nginx / Caddy 接入域名。提供独立 `compose.existing-proxy.yaml`，避免额外启动占用80/443的网关。
+
 ## 目录与数据
 
 | 路径                          | 内容                                                             |
