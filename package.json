@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "test:load": "tsx scripts/load-test.ts",
+    "test:load:ai": "tsx scripts/load-test-ai.ts",
     "test:ai": "tsx scripts/verify-ai.ts",
     "setup": "tsx scripts/setup.ts"
   },
