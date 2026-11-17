@@ -20,33 +20,57 @@
 
 /* Current-task classroom monitor. Keep cards stable while feedback updates. */
 .teacher-page:has(.progress-board) .teacher-page-top {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+.teacher-page:has(.progress-board) {
+  padding-top: 20px;
 }
 .teacher-page:has(.progress-board) .teacher-page-top h1 {
-  font-size: 23px;
+  font-size: 20px;
+  margin: 0;
+}
+.teacher-page:has(.progress-board) .teacher-page-top .eyebrow {
+  display: none;
 }
 .teacher-page:has(.progress-board) .teacher-page-top p {
-  margin-bottom: 0;
+  display: none;
 }
 .session-control.live-control {
   position: sticky;
   top: 0;
   z-index: 20;
-  padding: 17px 20px;
-  margin-bottom: 18px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
   box-shadow: 0 5px 20px #183a2410;
 }
-.live-control .section-title {
-  margin-bottom: 12px;
+.live-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
 }
-.live-control .section-title h2 {
-  font-size: 18px;
+.live-control-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.live-control-title h2 {
+  font-size: 17px;
+  margin: 0;
 }
 .live-control .steps {
-  padding: 10px 14px;
+  padding: 8px 12px;
 }
-.live-control .control-bottom {
-  margin-top: 12px;
+.live-control .button-row {
+  margin-left: auto;
+}
+.live-control .button {
+  padding: 9px 12px;
+  font-size: 11px;
 }
 .progress-heading {
   display: flex;
@@ -75,7 +99,7 @@
 }
 .progress-total {
   text-align: left;
-  padding: 12px 16px;
+  padding: 9px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: white;
@@ -85,8 +109,8 @@
 }
 .progress-total > b {
   display: block;
-  font-size: 27px;
-  line-height: 1.25;
+  font-size: 24px;
+  line-height: 1.2;
   margin-top: 5px;
   font-variant-numeric: tabular-nums;
 }
@@ -117,7 +141,7 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin: 12px 0 17px;
+  margin: 9px 0 12px;
   font-size: 11px;
 }
 .evaluation-filters > span {
@@ -164,7 +188,7 @@
   grid-template-columns: minmax(0, 1fr) 360px;
 }
 .progress-roster {
-  padding: 16px;
+  padding: 12px;
   min-width: 0;
 }
 .roster-heading {
@@ -172,7 +196,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 .roster-heading > span {
   display: inline-flex;
@@ -194,7 +218,7 @@
   position: relative;
   min-width: 0;
   text-align: left;
-  padding: 11px 12px;
+  padding: 8px 10px;
   border: 1px solid #e4e9e5;
   border-radius: 10px;
   background: #fff;
@@ -237,8 +261,8 @@
 .progress-student-id {
   display: block;
   font-size: 10px;
-  color: var(--muted);
-  margin-top: 3px;
+  color: #65776b;
+  margin-top: 2px;
   overflow-wrap: anywhere;
 }
 .progress-student-status {
@@ -246,7 +270,8 @@
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  margin-top: 10px;
+  margin-top: 5px;
+  white-space: nowrap;
 }
 .progress-student-status i {
   width: 5px;
@@ -274,16 +299,16 @@
 }
 .progress-student-caption {
   display: block;
-  margin-top: 5px;
-  color: #6b7e73;
+  margin-top: 3px;
+  color: #627368;
   font-size: 10px;
   line-height: 1.5;
 }
 .progress-evaluation {
   display: inline-block;
-  margin-top: 6px;
+  margin-left: auto;
   font-size: 9px;
-  padding: 2px 5px;
+  padding: 2px 3px;
   border-radius: 4px;
   background: #eceff2;
   color: #5f7082;
@@ -304,8 +329,8 @@
 }
 .progress-inspector {
   position: sticky;
-  top: 205px;
-  max-height: calc(100vh - 225px);
+  top: 140px;
+  max-height: calc(100vh - 155px);
   overflow-y: auto;
   min-width: 0;
   box-shadow: 0 5px 20px #173e2808;

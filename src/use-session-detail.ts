@@ -26,6 +26,11 @@ export function useDetail(
     pending.current?.abort();
     const controller = new AbortController();
     pending.current = controller;
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 10000);
     try {
       const next = await api<SessionDetail>(
         `/sessions/${sessionId}${student ? `?student=${encodeURIComponent(student)}` : ""}`,
@@ -41,12 +46,20 @@ export function useDetail(
       setError("");
       lastError.current = "";
     } catch (e) {
-      if (controller.signal.aborted || currentScope.current !== scope) return;
-      const message = (e as Error).message;
+      if (
+        (controller.signal.aborted && !timedOut) ||
+        currentScope.current !== scope ||
+        pending.current !== controller
+      )
+        return;
+      const message = timedOut
+        ? "进度刷新超时，将自动重试。"
+        : (e as Error).message;
       setError(message);
       if (lastError.current !== message) report.current(message);
       lastError.current = message;
     } finally {
+      clearTimeout(timeout);
       if (pending.current === controller) pending.current = null;
     }
   }, [sessionId, student, scope]);

@@ -153,15 +153,15 @@ export function ProgressBoard({
                   <span className="progress-student-status">
                     {row.state && <i />}
                     {row.state ? progressLabels[row.state] : row.caption}
+                    {row.evaluation && (
+                      <span className={`progress-evaluation ${row.evaluation}`}>
+                        {evaluationLabels[row.evaluation]}
+                      </span>
+                    )}
                   </span>
                   {row.state && (
                     <span className="progress-student-caption">
                       {row.caption}
-                    </span>
-                  )}
-                  {row.evaluation && (
-                    <span className={`progress-evaluation ${row.evaluation}`}>
-                      {evaluationLabels[row.evaluation]}
                     </span>
                   )}
                 </button>

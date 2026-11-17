@@ -379,23 +379,15 @@ function Live({
       ) : detail ? (
         <>
           <section className="session-control live-control">
-            <div className="section-title">
-              <div>
-                <span className="eyebrow">
-                  {detail.session.mode === "makeup"
-                    ? "MAKE-UP SESSION"
-                    : "LIVE CLASSROOM"}
-                </span>
+            <div className="live-control-row">
+              <div className="live-control-title">
                 <h2>{detail.lesson.title}</h2>
+                <Badge>
+                  <span className="live-dot" />
+                  {detail.session.mode === "makeup" ? "补做 · " : ""}
+                  {stageNames[detail.session.stage]}
+                </Badge>
               </div>
-              <Badge>
-                <span className="live-dot" />
-                {stageNames[detail.session.stage]}
-              </Badge>
-            </div>
-            <Steps stage={detail.session.stage} />
-            <div className="control-bottom">
-              <p>由你决定切换时机，未完成的任务会保留为“待补”。</p>
               <div className="button-row">
                 <button
                   className="button subtle"
@@ -434,6 +426,7 @@ function Live({
                 </button>
               </div>
             </div>
+            <Steps stage={detail.session.stage} />
           </section>
           <ProgressBoard
             detail={detail}
