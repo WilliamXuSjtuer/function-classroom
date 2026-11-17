@@ -76,14 +76,15 @@ export function useDetail(
       pending.current = null;
     };
   }, [load]);
-  const sameSession = snapshot?.detail.session.id === sessionId;
+  const sameSession =
+    snapshot !== null && snapshot.detail.session.id === sessionId;
   return {
     detail:
-      sameSession && (keepOverview || snapshot?.scope === scope)
-        ? snapshot!.detail
+      sameSession && (keepOverview || snapshot.scope === scope)
+        ? snapshot.detail
         : null,
     load,
     error,
-    updatedAt: sameSession ? snapshot!.updatedAt : null,
+    updatedAt: sameSession ? snapshot.updatedAt : null,
   };
 }
