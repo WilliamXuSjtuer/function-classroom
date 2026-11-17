@@ -20,10 +20,11 @@ https://classroom.william-ash.com
 
 ### 1. 准备应用
 
-服务器需要 Git、Docker Engine 和 Docker Compose 插件。先确认1116未被其他服务占用：
+服务器需要 Git、Docker Engine 和 Docker Compose 插件。以下 Docker 操作使用 `sudo`，适用于尚无 Docker socket 访问权限的普通登录用户（如 `admin`）。先验证 Docker 服务访问权限，并确认1116未被其他服务占用：
 
 ```bash
 docker compose version
+sudo docker info
 sudo ss -ltnp '( sport = :1116 )'
 mkdir -p ~/apps
 cd ~/apps
@@ -45,14 +46,21 @@ DEEPSEEK_API_KEY=填写实际密钥
 `CLASSROOM_ORIGIN` 必须与浏览器地址的协议、域名、端口完全一致，不带末尾斜杠。应用据此检查请求来源；`COOKIE_SECURE=true` 固定开启，浏览器须通过 HTTPS 登录。不要通过修改 Cookie 配置来绕过 HTTPS。
 
 ```bash
-docker compose -f compose.existing-proxy.yaml config --quiet
-docker compose -f compose.existing-proxy.yaml up -d --build
-docker compose -f compose.existing-proxy.yaml ps
-curl --fail http://127.0.0.1:1116/api/health
-docker compose -f compose.existing-proxy.yaml exec app node dist-server/server/create-teacher.js
+sudo docker compose -f compose.existing-proxy.yaml config --quiet
+sudo docker compose -f compose.existing-proxy.yaml up -d --build
+sudo docker compose -f compose.existing-proxy.yaml ps
+curl --fail --retry 10 --retry-connrefused --retry-delay 2 http://127.0.0.1:1116/api/health
 ```
 
-健康检查应返回 `{"ok":true}`。教师账号由终端交互创建，生产环境不创建演示账号。
+每一步成功后再执行下一步。健康检查应返回 `{"ok":true}`，之后创建教师账号：
+
+```bash
+sudo docker compose -f compose.existing-proxy.yaml exec app node dist-server/server/create-teacher.js
+```
+
+教师账号由终端交互创建，生产环境不创建演示账号。
+
+若出现 `permission denied ... /var/run/docker.sock`，说明当前用户无法访问 Docker 守护进程；用上面的 `sudo` 命令继续操作。`config --quiet` 不连接守护进程，其通过不代表有权限启动容器。此时健康检查的 `Connection refused` 是容器尚未启动的结果，无需调整域名或安全组。若 `sudo docker info` 仍报错，先处理其具体错误，再执行构建。Docker权限说明见[官方Linux安装后步骤](https://docs.docker.com/engine/install/linux-postinstall/)。
 
 ### 2. 解析子域名、接入现有网关
 
@@ -114,17 +122,17 @@ proxy_pass http://127.0.0.1:1117;
 备份并复制到服务器外的位置：
 
 ```bash
-docker compose -f compose.existing-proxy.yaml exec app node dist-server/server/backup.js
+sudo docker compose -f compose.existing-proxy.yaml exec app node dist-server/server/backup.js
 # 将“具体时间目录”替换为上一条命令打印的备份目录名。
-docker compose -f compose.existing-proxy.yaml cp app:/app/data/backups/具体时间目录 ./classroom-backup
+sudo docker compose -f compose.existing-proxy.yaml cp app:/app/data/backups/具体时间目录 ./classroom-backup
 ```
 
 在没有课堂活动时更新：
 
 ```bash
 git pull --ff-only
-docker compose -f compose.existing-proxy.yaml up -d --build
-docker compose -f compose.existing-proxy.yaml logs --tail=100 app
+sudo docker compose -f compose.existing-proxy.yaml up -d --build
+sudo docker compose -f compose.existing-proxy.yaml logs --tail=100 app
 ```
 
 更新保留原数据卷，不执行 `down -v`。备份恢复、课堂演练要求见[阿里云部署说明](./deployment-aliyun.md)。Nginx配置依据其[反向代理文档](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)和[HTTPS文档](https://nginx.org/en/docs/http/configuring_https_servers.html)；Caddy证书行为见[自动HTTPS文档](https://caddyserver.com/docs/automatic-https)。
