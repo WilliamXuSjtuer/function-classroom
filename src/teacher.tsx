@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   BookOpen,
@@ -28,6 +28,9 @@ import type {
 import { stageNames, stages } from "../shared/types";
 import type { Bootstrap } from "./App";
 import { api, post } from "./api";
+import { useDetail } from "./use-session-detail";
+import { ProgressBoard, ProgressInspector } from "./teacher-progress";
+import { classroomProgress } from "./progress";
 import {
   Badge,
   CheckProgress,
@@ -158,6 +161,7 @@ export function Teacher({ boot, refresh, page, setPage, notify }: Props) {
         />
       ) : (
         <Live
+          key={current?.id || activeClass.id}
           classroom={activeClass}
           session={current}
           lessons={boot.lessons}
@@ -195,43 +199,6 @@ export function Teacher({ boot, refresh, page, setPage, notify }: Props) {
     </main>
   );
 }
-function useDetail(
-  sessionId: string | undefined,
-  student: string,
-  notify: (error: string) => void,
-) {
-  const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const load = async () => {
-    if (sessionId)
-      setDetail(
-        await api(
-          `/sessions/${sessionId}${student ? `?student=${student}` : ""}`,
-        ),
-      );
-  };
-  useEffect(() => {
-    setDetail(null);
-    if (!sessionId) return;
-    let active = true;
-    const fetchData = () =>
-      api<SessionDetail>(
-        `/sessions/${sessionId}${student ? `?student=${student}` : ""}`,
-      )
-        .then((x) => {
-          if (active) setDetail(x);
-        })
-        .catch((e) => {
-          if (active) notify(e.message);
-        });
-    fetchData();
-    const timer = setInterval(fetchData, 3000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [sessionId, student]);
-  return { detail, load };
-}
 function Live({
   classroom,
   session,
@@ -251,7 +218,25 @@ function Live({
     [busy, setBusy] = useState(false),
     [end, setEnd] = useState(false),
     [student, setStudent] = useState("");
-  const { detail, load } = useDetail(session?.id, student, notify);
+  const { detail, load, error, updatedAt } = useDetail(
+    session?.id,
+    student,
+    notify,
+    true,
+  );
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const selectedProgress = detail
+    ? classroomProgress(detail).students.find(
+        (p) => p.participant.userId === student,
+      )
+    : undefined;
+  const selectedDetail =
+    detail?.participant?.userId === student ? detail : null;
+  function closeStudent() {
+    setStudent("");
+    if (returnFocus.current?.isConnected)
+      returnFocus.current.focus({ preventScroll: true });
+  }
   const published = lessons.filter((l) => l.status === "published");
   const selected = published.find((l) => l.id === lessonId) || published[0];
   async function open() {
@@ -299,47 +284,49 @@ function Live({
   ).length;
   return (
     <>
-      <div className="stat-grid">
-        <div className="stat-card">
-          <span className="stat-icon green">
-            <Users size={20} />
-          </span>
-          <div>
-            <p>班级学生</p>
-            <b>
-              {classroom.studentCount}
-              <small>人</small>
-            </b>
+      {!session && (
+        <div className="stat-grid">
+          <div className="stat-card">
+            <span className="stat-icon green">
+              <Users size={20} />
+            </span>
+            <div>
+              <p>班级学生</p>
+              <b>
+                {classroom.studentCount}
+                <small>人</small>
+              </b>
+            </div>
+            <span className="stat-note">一人一账号</span>
           </div>
-          <span className="stat-note">一人一账号</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-icon blue">
-            <CheckCircle2 size={20} />
-          </span>
-          <div>
-            <p>讲解达标</p>
-            <b>
-              {achieved}
-              <small>人</small>
-            </b>
+          <div className="stat-card">
+            <span className="stat-icon blue">
+              <CheckCircle2 size={20} />
+            </span>
+            <div>
+              <p>讲解达标</p>
+              <b>
+                {achieved}
+                <small>人</small>
+              </b>
+            </div>
+            <span className="stat-note">本课过程评价</span>
           </div>
-          <span className="stat-note">本课过程评价</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-icon amber">
-            <FileCheck2 size={20} />
-          </span>
-          <div>
-            <p>需要帮助</p>
-            <b>
-              {help}
-              <small>人</small>
-            </b>
+          <div className="stat-card">
+            <span className="stat-icon amber">
+              <FileCheck2 size={20} />
+            </span>
+            <div>
+              <p>需要帮助</p>
+              <b>
+                {help}
+                <small>人</small>
+              </b>
+            </div>
+            <span className="stat-note">值得多一点关注</span>
           </div>
-          <span className="stat-note">值得多一点关注</span>
         </div>
-      </div>
+      )}
       {!session ? (
         <div className="launch-card">
           <div className="launch-copy">
@@ -391,7 +378,7 @@ function Live({
         </div>
       ) : detail ? (
         <>
-          <section className="session-control">
+          <section className="session-control live-control">
             <div className="section-title">
               <div>
                 <span className="eyebrow">
@@ -448,61 +435,34 @@ function Live({
               </div>
             </div>
           </section>
-          <div className="monitor-columns">
-            <section className="surface student-monitor">
-              <div className="section-title">
-                <h2>
-                  全班学习动态 <span className="count">{students.length}</span>
-                </h2>
-                <span className="muted small">每 3 秒更新</span>
-              </div>
-              <div className="student-grid">
-                {students.map((p) => (
-                  <button
-                    key={p.userId}
-                    className={`student-tile ${detail.participant?.userId === p.userId ? "active" : ""}`}
-                    onClick={() => setStudent(p.userId)}
-                  >
-                    <div className="student-tile-top">
-                      <span className="mini-avatar">{p.name.slice(-2)}</span>
-                      <div>
-                        <b>{p.name}</b>
-                        <small>{p.username}</small>
-                      </div>
-                    </div>
-                    <Status
-                      value={taskStatus(
-                        p.explainStatus,
-                        p.explainEvaluationStatus,
-                      )}
-                    />
-                    {(Boolean(p.evaluationFailures) || p.needsReview) && (
-                      <small>有系统评价需复核</small>
-                    )}
-                    <span className="student-message-count">
-                      {p.messageCount} 次提交{p.pending ? " · 有待补任务" : ""}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-            <section className="surface lesson-summary">
-              <div className="section-title">
-                <h2>本课关注点</h2>
-                <BookOpen size={19} />
-              </div>
-              <CheckProgress
-                participant={detail.participant}
-                checklist={detail.lesson.checklist}
-              />
-              <div className="summary-note">
-                当前显示 {detail.participant?.name || "学生"} 的评价依据。
-                <br />
-                模型评价用于课堂观察，学习效果结合独立测验分析。
-              </div>
-            </section>
-          </div>
-          <TeacherTranscript detail={detail} />
+          <ProgressBoard
+            detail={detail}
+            selected={student}
+            error={error}
+            updatedAt={updatedAt}
+            onSelect={(id) => {
+              returnFocus.current = document.activeElement as HTMLElement;
+              setStudent(id);
+            }}
+            inspector={
+              selectedProgress ? (
+                <ProgressInspector
+                  row={selectedProgress}
+                  detail={selectedDetail}
+                  onClose={closeStudent}
+                  loadingError={error}
+                  transcript={
+                    selectedDetail ? (
+                      <TeacherTranscript
+                        detail={selectedDetail}
+                        autoScroll={false}
+                      />
+                    ) : null
+                  }
+                />
+              ) : null
+            }
+          />
         </>
       ) : (
         <Empty title="正在读取课堂状态…" />
@@ -560,7 +520,13 @@ function Live({
     </>
   );
 }
-function TeacherTranscript({ detail }: { detail: SessionDetail }) {
+function TeacherTranscript({
+  detail,
+  autoScroll = true,
+}: {
+  detail: SessionDetail;
+  autoScroll?: boolean;
+}) {
   return (
     <section className="surface transcript">
       <div className="section-title">
@@ -602,7 +568,7 @@ function TeacherTranscript({ detail }: { detail: SessionDetail }) {
               有效作答排除识别出的澄清与收尾，不代表答案正确。新统计从新版提交开始，历史记录不回填。
             </p>
           </details>
-          <Conversation messages={detail.messages} />
+          <Conversation messages={detail.messages} autoScroll={autoScroll} />
           <details className="evaluation-details">
             <summary>
               查看模型评价依据 <ChevronRight size={15} />

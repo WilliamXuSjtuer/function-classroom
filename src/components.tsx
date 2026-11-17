@@ -197,15 +197,18 @@ export function Status({ value }: { value: string }) {
 export function Conversation({
   messages,
   onRetry,
+  autoScroll = true,
 }: {
   messages: Message[];
   onRetry?: (id: string) => void;
+  autoScroll?: boolean;
 }) {
   const end = useRef<HTMLDivElement>(null);
   const signature = messages.map((m) => `${m.id}:${m.status}`).join("|");
   useEffect(() => {
-    end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [signature]);
+    if (autoScroll)
+      end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [signature, autoScroll]);
   return (
     <div className="conversation">
       {messages.map((m) => (
