@@ -141,6 +141,7 @@ export interface Evaluation {
   interaction?: {
     kind:
       | "question"
+      | "reference"
       | "supplement"
       | "correction"
       | "acknowledge"

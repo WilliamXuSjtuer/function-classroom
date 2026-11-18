@@ -8,6 +8,7 @@ import type {
 import { Store, id, now } from "./db.js";
 import type { Config } from "./config.js";
 import { PROMPT_VERSION, type AIResult, type Evaluator } from "./ai.js";
+import { exerciseSupport, referenceIntro } from "./exercise-support.js";
 import { readSupport, explainFeedback } from "./support.js";
 import {
   completedFeedback,
@@ -309,6 +310,13 @@ export class ClassroomService {
     const priorJudgment = JSON.parse(previous.judgments)[
       lesson.exercises[m.exercise_index]?.id
     ];
+    const referenceShown =
+      m.stage === "judge" &&
+      !!exerciseSupport(
+        messages,
+        lesson.exercises[m.exercise_index],
+        m.exercise_index,
+      ).get(m.id)?.referenceShown;
     const closing =
       kind === "social" &&
       !isDisagreement(m.body) &&
@@ -337,6 +345,7 @@ export class ClassroomService {
           previousChecks: JSON.parse(previous.checks),
           support: {
             explainFocus: readSupport(previous.focus).active,
+            referenceShown,
             judgeHints:
               JSON.parse(previous.judgments)[
                 lesson.exercises[m.exercise_index]?.id
@@ -391,6 +400,7 @@ export class ClassroomService {
           record.firstAchievementUnknown ||
           (record.status === "achieved" && !record.firstAchievedAt);
         const passed =
+          kind === "answer" &&
           messages
             .filter(
               (x) =>
@@ -405,20 +415,27 @@ export class ClassroomService {
         taskPassed = passed;
         const hints = record.hints || 0;
         const guiding = kind !== "clarification";
+        const showReference =
+          guiding &&
+          !passed &&
+          hints >= 2 &&
+          !referenceShown &&
+          !this.config.demo;
         if (!guiding) feedback = result.feedback;
         else if (passed) feedback = completedFeedback("judge", !ex.isCorrect);
         else
-          feedback =
-            hints < 2
-              ? result.feedback || `我还想请你解释一下：${ex.hint}`
-              : `我对照材料重新检查了一下：${ex.errorExplanation || "这道题的关键依据如下。"}\n\n${ex.correctAnswer}\n\n你能再用自己的话说明判断依据${ex.isCorrect ? "吗？" : "，并教我怎样修正吗？"}`;
+          feedback = !showReference
+            ? result.feedback || `我还想请你解释一下：${ex.hint}`
+            : `${referenceIntro}${ex.errorExplanation || "这道题的关键依据如下。"}\n\n${ex.correctAnswer}\n\n${ex.hint}`;
         interaction = {
           kind:
             kind === "clarification"
               ? ("clarification" as const)
               : passed
                 ? ("acknowledge" as const)
-                : ("question" as const),
+                : showReference
+                  ? ("reference" as const)
+                  : ("question" as const),
           target: ex.id,
         };
         if (!stale) {

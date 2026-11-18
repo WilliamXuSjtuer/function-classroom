@@ -6,7 +6,11 @@ import type {
   Message,
 } from "../shared/types.js";
 import type { AIInput, AIResult } from "./ai.js";
-import { canSupportReasoning } from "./dialogue.js";
+import {
+  canSupportReasoning,
+  isBareParityConclusion,
+  submissionKind,
+} from "./dialogue.js";
 
 import { reviewedParts } from "./rubrics.js";
 
@@ -195,15 +199,26 @@ export function normalizeAssessment(
     raw.reasoningEvidence,
     raw.reasoningAccepted && input.stage === "judge",
     "判断依据",
-  );
+  ).filter((ref) => ref.kind === "image" || !isBareParityConclusion(ref.quote));
   const correctionEvidence = taskRefs(
     raw.correctionEvidence,
     raw.corrected && input.stage === "judge",
     "纠正依据",
   );
+  // A new pass needs a contribution from this turn. Earlier evidence can
+  // establish either the reason or the correction, but cannot turn unrelated
+  // follow-up text into a new successful attempt.
+  const contributes =
+    reasoningEvidence.some((r) => r.messageId === latest.id) ||
+    (raw.corrected &&
+      !input.lesson.exercises[input.exerciseIndex]?.isCorrect &&
+      correctionEvidence.some((r) => r.messageId === latest.id));
   const reasoningAccepted =
     input.stage === "judge" &&
     raw.reasoningAccepted &&
+    (contributes ||
+      submissionKind(latest.body, latest.attachments.length > 0) !==
+        "answer") &&
     reasoningEvidence.length > 0;
   const corrected =
     input.stage === "judge" && raw.corrected && correctionEvidence.length > 0;

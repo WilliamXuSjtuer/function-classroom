@@ -4,7 +4,8 @@ import path from "node:path";
 import type { Response } from "express";
 import type { Store } from "./db.js";
 import type { ClassroomService } from "./classroom.js";
-import type { User } from "../shared/types.js";
+import { exerciseSupport } from "./exercise-support.js";
+import type { Lesson, User } from "../shared/types.js";
 export async function exportClass(
   store: Store,
   service: ClassroomService,
@@ -74,6 +75,8 @@ export async function exportClass(
       "首次达标消息编号",
       "新统计开始时间（UTC）",
       "未分类历史提交次数",
+      "首次达标前引导提问次数",
+      "首次达标前是否已发送完整参考答案",
     ],
     [
       "学号",
@@ -150,10 +153,11 @@ export async function exportClass(
     "SELECT * FROM sessions WHERE class_id=? ORDER BY created_at",
     classId,
   )) {
-    const lesson = JSON.parse(s.snapshot);
+    const lesson: Lesson = JSON.parse(s.snapshot);
     const mode = s.mode === "makeup" ? "补做" : "正式课堂";
     for (const p of service.participants(s.id)) {
-      for (const m of service.messages(s.id, p.userId)) {
+      const messages = service.messages(s.id, p.userId);
+      for (const m of messages) {
         const files = store.all(
           "SELECT * FROM attachments WHERE message_id=?",
           m.id,
@@ -250,8 +254,11 @@ export async function exportClass(
                 ]);
         }
       }
-      for (const ex of lesson.exercises) {
+      for (const [index, ex] of lesson.exercises.entries()) {
         const j = p.judgments[ex.id];
+        const support = j?.firstAchievedMessageId
+          ? exerciseSupport(messages, ex, index).get(j.firstAchievedMessageId)
+          : undefined;
         performances.addRow([
           p.username,
           p.name,
@@ -285,6 +292,8 @@ export async function exportClass(
           j?.firstAchievedMessageId ?? "",
           j?.statisticsStartedAt ?? "",
           j?.legacyAttempts ?? j?.attempts ?? "",
+          support?.known ? support.hints : "",
+          support?.referenceShown ? "是" : support?.known ? "否" : "",
         ]);
       }
     }
@@ -314,7 +323,7 @@ export async function exportClass(
   archive.pipe(res);
   archive.append(xlsx, { name: "课堂过程记录.xlsx" });
   archive.append(
-    "原始对话、任务表现、评价依据、细项证据与课堂事件保存在 Excel 中。images 目录中的文件与“图片附件”列对应。时间采用 UTC。模型评价需结合原始记录复核；前后测成绩在系统外管理。\n评价状态：not_submitted=尚未提交，processing=评价中，evaluated=已评价，failed=系统未能评价，review=证据待教师复核。系统失败、待复核和任务待补均不能直接解释为学生未掌握。讲解补充说明与明确纠错分别计数。历史评价保留原提示词版本，不用新版规则改写旧记录。\n提交次数保留所有提交；有效作答次数仅统计新版记录中首次达标前的作答，排除识别出的澄清、表态和收尾，不代表答案正确或评价成功。图片按作答处理；自动重试不新增次数。首次达标后提交次数包含达标后的所有交流，与澄清、表态次数可能重叠。首次达标时间为有效评价完成时间。新统计仅从“新统计开始时间”起累计，旧数据不补填：空白表示未记录，未分类历史提交次数单列。提交类型采用保守规则识别，未识别内容按作答处理，研究时请结合原话复核。\n",
+    "原始对话、任务表现、评价依据、细项证据与课堂事件保存在 Excel 中。images 目录中的文件与“图片附件”列对应。时间采用 UTC。模型评价需结合原始记录复核；前后测成绩在系统外管理。\n评价状态：not_submitted=尚未提交，processing=评价中，evaluated=已评价，failed=系统未能评价，review=证据待教师复核。系统失败、待复核和任务待补均不能直接解释为学生未掌握。讲解补充说明与明确纠错分别计数。历史评价保留原提示词版本，不用新版规则改写旧记录。\n提交次数保留所有提交；有效作答次数仅统计新版记录中首次达标前的作答，排除识别出的澄清、表态和收尾，不代表答案正确或评价成功。图片按作答处理；自动重试不新增次数。首次达标后提交次数包含达标后的所有交流，与澄清、表态次数可能重叠。首次达标时间为有效评价完成时间。新统计仅从“新统计开始时间”起累计，旧数据不补填：空白表示未记录，未分类历史提交次数单列。首次达标前的引导提问及完整参考答案按同一学生、同一题的已发送反馈计算。完整参考答案指系统提供的完整参考解答，未记录展示并不等于独立完成；不含学生查看小知试做、口头帮助或模型自由回复中透露的线索。未达标或历史信息不足时相应栏留空。提交类型采用保守规则识别，未识别内容按作答处理，研究时请结合原话复核。\n",
     { name: "说明.txt" },
   );
   for (const a of new Map(attachments.map((a) => [a.id, a])).values())

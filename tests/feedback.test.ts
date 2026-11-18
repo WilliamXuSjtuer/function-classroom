@@ -98,6 +98,14 @@ test("例题通过后明确收尾，保留全部提交并单列有效作答和�
       sent.id,
     );
     assert.equal(row.getCell(values.indexOf("首次达标后提交次数")).value, 2);
+    assert.equal(
+      row.getCell(values.indexOf("首次达标前引导提问次数")).value,
+      1,
+    );
+    assert.equal(
+      row.getCell(values.indexOf("首次达标前是否已发送完整参考答案")).value,
+      "否",
+    );
   } finally {
     await f.close();
   }
@@ -108,12 +116,14 @@ test("学生补充理由后收到针对新回答的追问，第三轮才给明�
     "我想知道两个根式的限制要怎样一起考虑。",
     "我明白要同时满足了！那分别有什么限制，有共同的 x 吗？",
     "我还有一点困惑。",
+    "如果输入是2，第二个根式里的数是多少呢？",
+    "你讲的交集为空我听明白了。",
   ];
   let turn = 0;
   const f = await fixture(async (input) => ({
     ...(await goodEvaluation(input)),
     feedback: replies[turn++],
-    reasoningAccepted: false,
+    reasoningAccepted: turn === 5,
     corrected: false,
   }));
   try {
@@ -128,6 +138,8 @@ test("学生补充理由后收到针对新回答的追问，第三轮才给明�
       "我觉得是对的",
       "需要同时满足",
       "我还不懂",
+      "你哪里有问题啊，你别让我重新表述，你到底哪里不懂啊",
+      "前一个根式要求x≥2，后一个要求x≤1，不能同时满足，交集为空",
     ].entries()) {
       const sent = await f.request(
         "POST",
@@ -145,12 +157,36 @@ test("学生补充理由后收到针对新回答的追问，第三轮才给明�
         x.messages.some((m: any) => m.replyTo === sent.id),
       );
       const reply = after.messages.find((m: any) => m.replyTo === sent.id).body;
-      if (i < 2) assert.equal(reply, replies[i]);
-      else assert.match(reply, /不存在这样的/);
-      assert.notEqual(
-        after.participant.judgments["concept-02"].status,
-        "achieved",
-      );
+      if (i === 2) assert.match(reply, /不存在这样的/);
+      else if (i < 4) assert.equal(reply, replies[i]);
+      const j = after.participant.judgments["concept-02"];
+      assert.equal(j.status === "achieved", i === 4);
+      if (i === 3) assert.equal(j.hints, 3);
+      if (i === 4) {
+        const result = await fetch(
+          f.base + "/api/classes/" + c.id + "/export",
+          { headers: { Cookie: f.teacher } },
+        );
+        const zip = await unzipper.Open.buffer(
+          Buffer.from(await result.arrayBuffer()),
+        );
+        const book = new ExcelJS.Workbook();
+        await book.xlsx.load(
+          await zip.files.find((x) => x.path === "课堂过程记录.xlsx")!.buffer(),
+        );
+        const sh = book.getWorksheet("任务表现")!;
+        const labels = sh.getRow(1).values as string[];
+        assert.equal(
+          sh
+            .getRow(3)
+            .getCell(labels.indexOf("首次达标前是否已发送完整参考答案")).value,
+          "是",
+        );
+        assert.equal(
+          sh.getRow(3).getCell(labels.indexOf("首次达标前引导提问次数")).value,
+          2,
+        );
+      }
     }
   } finally {
     await f.close();
@@ -692,4 +728,43 @@ test("教师保存超过20条的单项细分标准时获得明确提示", async 
   } finally {
     await f.close();
   }
+});
+
+test("旧版完整解答只按本题在提交之前实际发送的回复计算", async () => {
+  const { exerciseSupport } = await import("../server/exercise-support.js");
+  const { conceptLesson, studentMessage } = await import("./model-helpers.js");
+  const ex = conceptLesson.exercises[0];
+  const a = studentMessage("a", "第一个判断", "judge");
+  const reply = {
+    ...studentMessage(
+      "reply",
+      "我对照材料重新检查了一下：" + ex.correctAnswer,
+      "judge",
+    ),
+    role: "assistant" as const,
+    replyTo: a.id,
+  };
+  const b = studentMessage("b", "最新判断", "judge");
+  const task = exerciseSupport([a, reply, b], ex, 0);
+  assert.deepEqual(task.get("a"), {
+    hints: 0,
+    referenceShown: false,
+    known: true,
+  });
+  assert.deepEqual(task.get("b"), {
+    hints: 0,
+    referenceShown: true,
+    known: true,
+  });
+  assert.equal(
+    exerciseSupport([a, { ...reply, exerciseIndex: 1 }, b], ex, 0).get("b")
+      ?.referenceShown,
+    false,
+  );
+  assert.equal(
+    exerciseSupport([a, { ...reply, body: "未标记的历史反馈" }, b], ex, 0).get(
+      "b",
+    )?.known,
+    false,
+  );
 });

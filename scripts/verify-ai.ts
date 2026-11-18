@@ -250,6 +250,85 @@ cases.push(
       part(r, 0, "continuous") !== "met",
   },
 );
+const parity = lessons.find((l) => l.id === "parity-definition")!;
+function parityTask(
+  i: number,
+  turns: Array<[string, string, "student" | "assistant"]>,
+): AIInput {
+  const ex = parity.exercises[i];
+  return {
+    ...input([
+      message(
+        "problem",
+        ex.prompt + "\n" + ex.attempt,
+        "attempt",
+        i,
+        "assistant",
+      ),
+      ...turns.map(([id, body, role]) => message(id, body, "judge", i, role)),
+    ]),
+    lesson: parity,
+  };
+}
+cases.push(
+  {
+    name: "奇偶性：未定义的函数值不能用于不等比较",
+    input: parityTask(0, [
+      ["mistake", "f(-1)和f(1)不相等，所以不对。", "student"],
+    ]),
+    accepts: (r) =>
+      !r.reasoningAccepted &&
+      !r.corrected &&
+      /无定义|没有定义|未定义|不能取|取不到|没有函数值|不存在|不在/.test(
+        r.feedback,
+      ),
+  },
+  ...["都不是", "什么都不是呀"].map((conclusion) => ({
+    name: "奇偶性：识别跨轮非奇非偶结论 " + conclusion,
+    input: parityTask(0, [
+      ["endpoints", "右端的1属于定义域，它的相反数却被排除了。", "student"],
+      ["ask", "那么奇函数和偶函数里面，它是哪一种？", "assistant"],
+      ["conclusion", conclusion, "student"],
+    ]),
+    accepts: (r: AIResult) =>
+      r.reasoningAccepted &&
+      r.corrected &&
+      !!r.reasoningEvidence?.some((e) => e.messageId === "endpoints") &&
+      !!r.correctionEvidence?.some((e) => e.messageId === "conclusion"),
+  })),
+  {
+    name: "奇偶性：改题目端点不能算作修正原解",
+    input: parityTask(0, [
+      ["change", "我把定义域换成闭区间[-1,1]，这样就成偶函数了。", "student"],
+    ]),
+    accepts: (r) => !r.corrected,
+  },
+  {
+    name: "奇偶性：追问属于符号的矛盾",
+    input: parityTask(1, [
+      ["compare", "对任意实数t都有f(t)=f(-t)。", "student"],
+      ["ask", "定义域为什么对称？", "assistant"],
+      ["symbol", "因为对任意x∉R，都有-x∈R。", "student"],
+    ]),
+    accepts: (r) =>
+      !r.reasoningAccepted && /∉|不属于|不在实数|符号/.test(r.feedback),
+  },
+);
+cases.push({
+  name: "给过参考答案后具体说明困惑",
+  input: {
+    ...parityTask(0, [
+      ["ref", "原题左右端点不成对，因此既非奇也非偶。", "assistant"],
+      ["confusion", "你到底哪一步没懂？", "student"],
+    ]),
+    support: { explainFocus: {}, judgeHints: 3, referenceShown: true },
+  },
+  accepts: (r) =>
+    !r.reasoningAccepted &&
+    !r.corrected &&
+    /端点|区间|相反数|[−-]1|定义域/.test(r.feedback) &&
+    !/再用自己的话|重新表述/.test(r.feedback),
+});
 const results = [];
 for (const c of cases) {
   const start = Date.now();
@@ -292,7 +371,7 @@ for (const c of cases) {
 }
 await mkdir("artifacts", { recursive: true });
 await writeFile(
-  "artifacts/ai-review-v2.1.json",
+  `artifacts/ai-review-${PROMPT_VERSION}.json`,
   JSON.stringify(
     {
       date: new Date().toISOString(),

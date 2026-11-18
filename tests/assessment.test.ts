@@ -379,3 +379,43 @@ test("尚未纠正的旧错误可继续引用，不能借较早的正确原话�
     await f.close();
   }
 });
+
+test("非奇非偶的口语结论可以补全修正，但不能单独充当理由", async () => {
+  const conclusion = studentMessage("conclusion", "什么都不是呀", "judge");
+  const reason = studentMessage(
+    "reason",
+    "1属于定义域，它的相反数不在里面",
+    "judge",
+  );
+  let includeReason = false;
+  const f = await modelFixture(() =>
+    rawAssessment({
+      reasoningAccepted: true,
+      corrected: true,
+      reasoningEvidence: [
+        includeReason
+          ? evidence(reason.id, reason.body)
+          : evidence(conclusion.id, conclusion.body),
+      ],
+      correctionEvidence: [evidence(conclusion.id, conclusion.body)],
+    }),
+  );
+  try {
+    const alone = await f.evaluate(inputFor([conclusion]));
+    assert.equal(alone.reasoningAccepted, false);
+    includeReason = true;
+    const together = await f.evaluate(inputFor([reason, conclusion]));
+    assert.equal(together.reasoningAccepted, true);
+    assert.equal(together.corrected, true);
+    const offTopic = await f.evaluate(
+      inputFor([
+        reason,
+        conclusion,
+        studentMessage("new", "今天午餐几点", "judge"),
+      ]),
+    );
+    assert.equal(offTopic.reasoningAccepted, false);
+  } finally {
+    await f.close();
+  }
+});

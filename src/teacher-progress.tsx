@@ -117,6 +117,25 @@ export function ProgressBoard({
           </span>
         </div>
       )}
+      {progress.gaps.length > 0 && (
+        <section
+          className="knowledge-gaps surface"
+          aria-label="全班知识点讲解情况"
+        >
+          <h3>知识点讲解情况</h3>
+          <ul>
+            {progress.gaps.map((gap) => (
+              <li key={gap.id}>
+                <strong>{gap.label}</strong>
+                <span>{gap.missing} 人待补充</span>
+                <small>
+                  {gap.met} 人已满足 · {gap.awaiting} 人待评价
+                </small>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <div className={`progress-layout ${selected ? "with-inspector" : ""}`}>
         <div className="progress-roster surface">
           <div className="roster-heading">

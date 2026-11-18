@@ -56,7 +56,7 @@ export function explainFeedback(
     const target = `${issue.key}:${issue.partId || "criterion"}`;
     const count = support.active[target] || 0;
     const kind =
-      count < 2
+      count !== 2
         ? "question"
         : issue.kind === "missing"
           ? "supplement"

@@ -101,7 +101,40 @@ export function classroomProgress(
             : `第 ${session.exerciseIndex + 1} 题 · ${state === "achieved" ? "判断纠错已完成" : state === "not_submitted" ? "等待首次作答" : "判断与纠错中"}`,
       };
     });
-  return { assessed, students, total: students.length, counts, evaluations };
+  const gaps =
+    session.stage === "explain"
+      ? lesson.checklist
+          .map(({ id, label }) => {
+            let met = 0;
+            let missing = 0;
+            for (const { participant } of students) {
+              const check = participant.checks.find((c) => c.id === id);
+              if (check?.met) met++;
+              else if (
+                check &&
+                participant.explainEvaluationStatus === "evaluated" &&
+                !check.parts?.some((part) => part.status === "unverified")
+              )
+                missing++;
+            }
+            return {
+              id,
+              label,
+              met,
+              missing,
+              awaiting: students.length - met - missing,
+            };
+          })
+          .sort((a, b) => b.missing - a.missing)
+      : [];
+  return {
+    assessed,
+    students,
+    total: students.length,
+    counts,
+    evaluations,
+    gaps,
+  };
 }
 
 export function matchesProgress(

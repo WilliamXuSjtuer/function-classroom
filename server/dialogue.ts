@@ -17,6 +17,7 @@ export function submissionKind(
 ): SubmissionKind {
   if (hasImages) return "answer";
   const text = compact(body);
+  if (/^什么都不是(?:呀|啊|呢|的)?$/.test(text)) return "answer";
   if (agreement.test(text) || closure.test(text)) return "social";
   const clauses = body
     .split(/[，。！？,!?;；\n]+/)
@@ -27,6 +28,17 @@ export function submissionKind(
     clauses.every((c) => agreement.test(c) || closure.test(c))
   )
     return "social";
+  const asksWhichStep =
+    /^(?:你)?(?:到底|究竟)?(?:是)?(?:哪(?:里|儿|一步)(?:有问题|不懂|没懂|不明白)|有什么不懂)(?:啊|呀|呢|吗|的)?$/;
+  if (
+    clauses.some((c) => asksWhichStep.test(c)) &&
+    clauses.every(
+      (c) =>
+        asksWhichStep.test(c) ||
+        /^(?:你)?别让我(?:重新表述|重复|再说一遍)$/.test(c),
+    )
+  )
+    return "clarification";
   if (clarification.test(text)) return "clarification";
   return "answer";
 }
@@ -40,6 +52,13 @@ export function canSupportReasoning(quote: string) {
     Boolean(text) &&
     submissionKind(quote) === "answer" &&
     !/^(?:都)?(?:满足|不满足|成立|不成立|可以|不可以|能|不能|是|否)$/.test(text)
+  );
+}
+
+// A bare classification can complete a correction once a reason is known.
+export function isBareParityConclusion(quote: string) {
+  return /^(?:它|该函数|它们)?(?:都不是|什么都不是|非奇非偶(?:函数)?|既不是奇函数也不是偶函数)(?:呀|啊|呢|的)?$/.test(
+    compact(quote),
   );
 }
 

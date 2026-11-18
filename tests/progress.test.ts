@@ -224,6 +224,7 @@ test("全班学习状态互斥统计，处理中和失败不会抹去已核验�
         explainEvaluationStatus: "evaluated",
         checks: [
           { id: "a", met: true, evidenceMessageId: "m", quote: "根据区间选段" },
+          { id: "b", met: false, evidenceMessageId: null, quote: "" },
           { id: "old", met: true, evidenceMessageId: "m", quote: "旧标准" },
         ],
       }),
@@ -240,6 +241,10 @@ test("全班学习状态互斥统计，处理中和失败不会抹去已核验�
     failed: 1,
     review: 1,
   });
+  assert.deepEqual(progress.gaps, [
+    { id: "b", label: "端点", met: 0, missing: 1, awaiting: 5 },
+    { id: "a", label: "选段", met: 1, missing: 0, awaiting: 5 },
+  ]);
   assert.equal(progress.total, 6);
   assert.deepEqual(
     progress.students.map((s) => s.participant.username),
