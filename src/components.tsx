@@ -99,11 +99,13 @@ export function Modal({
   onClose,
   children,
   wide = false,
+  closeDisabled = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  closeDisabled?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [error, setError] = useState("");
@@ -120,9 +122,13 @@ export function Modal({
     <dialog
       ref={ref}
       className={`modal ${wide ? "wide" : ""}`}
-      onCancel={onClose}
+      aria-label={title}
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!closeDisabled) onClose();
+      }}
       onClick={(e) => {
-        if (e.target === ref.current) onClose();
+        if (!closeDisabled && e.target === ref.current) onClose();
       }}
     >
       <header>
@@ -130,6 +136,7 @@ export function Modal({
         <button
           className="icon-button"
           aria-label="关闭对话框"
+          disabled={closeDisabled}
           onClick={onClose}
         >
           <X size={20} />

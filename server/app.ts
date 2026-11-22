@@ -20,7 +20,12 @@ import { exportClass } from "./export.js";
 import type { Config } from "./config.js";
 import type { User, Lesson } from "../shared/types.js";
 import { stages } from "../shared/types.js";
-type AuthRequest = Request & { user: User };
+import {
+  initialStudentPassword,
+  passwordMaxLength,
+  studentPasswordMinLength,
+} from "../shared/password.js";
+type AuthRequest = Request & { user: User; sessionHash: string };
 export async function createApp(config: Config, evaluator?: Evaluator) {
   const store = new Store(config.dataDir);
   const service = new ClassroomService(
@@ -67,46 +72,47 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
       aiReady: Boolean(config.apiKey || config.demo),
     }),
   );
+  function countAttempt(key: string, limit: number, message: string) {
+    const timestamp = Date.now();
+    store.run("DELETE FROM login_limits WHERE reset_at<=?", timestamp);
+    const entry = store.get(
+      "SELECT attempts FROM login_limits WHERE key=?",
+      key,
+    );
+    ensure(!entry || entry.attempts < limit, 429, message);
+    store.run(
+      "INSERT INTO login_limits VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1",
+      key,
+      timestamp + 15 * 60 * 1000,
+    );
+  }
   app.post("/api/login", async (req, res) => {
     const { username, password } = z
       .object({
         username: z.string().trim().min(1).max(64),
-        password: z.string().min(1).max(128),
+        password: z.string().min(1).max(passwordMaxLength),
       })
       .parse(req.body);
-    const timestamp = Date.now();
-    store.run("DELETE FROM login_limits WHERE reset_at<?", timestamp);
-    for (const [key, limit] of [
-      [`ip:${req.ip}`, 250],
-      [`user:${username}`, 12],
-    ] as const) {
-      const entry = store.get("SELECT * FROM login_limits WHERE key=?", key);
-      ensure(
-        !entry || entry.attempts < limit,
-        429,
-        "登录尝试较多，请15分钟后重试。",
-      );
-      store.run(
-        "INSERT INTO login_limits VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1",
-        key,
-        timestamp + 15 * 60 * 1000,
-      );
-    }
+    const limitMessage = "登录尝试较多，请15分钟后重试。";
+    countAttempt(`ip:${req.ip}`, 250, limitMessage);
+    countAttempt(`user:${username}`, 12, limitMessage);
     const row = store.get("SELECT * FROM users WHERE username=?", username);
     ensure(
       row && (await verifyPassword(password, row.password)),
       401,
       "账号或密码不正确。",
     );
-    store.run("DELETE FROM login_limits WHERE key=?", `user:${username}`);
     const token = randomBytes(32).toString("hex");
     store.run("DELETE FROM auth_sessions WHERE expires<?", Date.now());
-    store.run(
-      "INSERT INTO auth_sessions VALUES(?,?,?)",
+    const session = store.run(
+      "INSERT INTO auth_sessions SELECT ?,id,? FROM users WHERE id=? AND password=?",
       tokenHash(token),
-      row.id,
       Date.now() + 7 * 86400000,
+      row.id,
+      row.password,
     );
+    ensure(session.changes, 401, "密码已更新，请使用最新密码登录。");
+    store.run("DELETE FROM login_limits WHERE key=?", `user:${username}`);
     res.setHeader(
       "Set-Cookie",
       serialize("classroom_session", token, {
@@ -121,15 +127,17 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
   });
   app.use("/api", (req: Request, res: Response, next: NextFunction) => {
     const token = parse(req.headers.cookie || "").classroom_session;
-    const row = token
+    const sessionHash = token ? tokenHash(token) : "";
+    const row = sessionHash
       ? store.get(
           "SELECT u.* FROM auth_sessions a JOIN users u ON u.id=a.user_id WHERE a.token=? AND a.expires>?",
-          tokenHash(token),
+          sessionHash,
           Date.now(),
         )
       : null;
     if (!row) return res.status(401).json({ error: "请先登录。" });
     (req as AuthRequest).user = publicUser(row);
+    (req as AuthRequest).sessionHash = sessionHash;
     next();
   });
   const user = (req: Request) => (req as AuthRequest).user;
@@ -139,10 +147,77 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
     return u;
   };
   app.get("/api/me", (req, res) => res.json({ user: user(req) }));
+  app.post("/api/me/password", async (req, res) => {
+    const u = user(req);
+    ensure(u.role === "student", 403, "请使用学生账号修改密码。");
+    const { currentPassword, newPassword } = z
+      .object({
+        currentPassword: z
+          .string()
+          .min(1, "请输入当前密码。")
+          .max(passwordMaxLength),
+        newPassword: z
+          .string()
+          .min(
+            studentPasswordMinLength,
+            `新密码至少需要 ${studentPasswordMinLength} 个字符。`,
+          )
+          .max(
+            passwordMaxLength,
+            `新密码最多可用 ${passwordMaxLength} 个字符。`,
+          ),
+      })
+      .parse(req.body);
+    ensure(newPassword !== currentPassword, 400, "新密码需要与当前密码不同。");
+    const attemptKey = `change:${u.id}`;
+    countAttempt(attemptKey, 12, "密码验证尝试较多，请15分钟后重试。");
+    const previous = store.get(
+      "SELECT password FROM users WHERE id=?",
+      u.id,
+    )!.password;
+    ensure(
+      await verifyPassword(currentPassword, previous),
+      400,
+      "当前密码不正确。",
+    );
+    const password = await hashPassword(newPassword);
+    const { sessionHash } = req as AuthRequest;
+    store.tx(() => {
+      ensure(
+        store.get(
+          "SELECT 1 FROM auth_sessions WHERE token=? AND user_id=? AND expires>?",
+          sessionHash,
+          u.id,
+          Date.now(),
+        ),
+        401,
+        "登录已失效，请重新登录。",
+      );
+      const updated = store.run(
+        "UPDATE users SET password=? WHERE id=? AND password=?",
+        password,
+        u.id,
+        previous,
+      );
+      ensure(updated.changes, 409, "密码已更新，请使用最新密码重试。");
+      store.run(
+        "DELETE FROM auth_sessions WHERE user_id=? AND token<>?",
+        u.id,
+        sessionHash,
+      );
+      store.run(
+        "DELETE FROM login_limits WHERE key IN (?,?)",
+        attemptKey,
+        `user:${u.username}`,
+      );
+    });
+    res.json({ ok: true });
+  });
   app.post("/api/logout", (req, res) => {
-    const token = parse(req.headers.cookie || "").classroom_session;
-    if (token)
-      store.run("DELETE FROM auth_sessions WHERE token=?", tokenHash(token));
+    store.run(
+      "DELETE FROM auth_sessions WHERE token=?",
+      (req as AuthRequest).sessionHash,
+    );
     res.setHeader(
       "Set-Cookie",
       serialize("classroom_session", "", {
@@ -248,7 +323,7 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
     for (const row of rows)
       prepared.push({
         ...row,
-        password: await hashPassword(row.username.slice(-4)),
+        password: await hashPassword(initialStudentPassword(row.username)),
         id: id(),
       });
     store.tx(() => {
@@ -285,10 +360,15 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
     );
     ensure(s, 404, "未找到学生。");
     service.ownClass(u, s.class_id);
-    const password = await hashPassword(s.username.slice(-4));
+    const password = await hashPassword(initialStudentPassword(s.username));
     store.tx(() => {
       store.run("UPDATE users SET password=? WHERE id=?", password, s.id);
       store.run("DELETE FROM auth_sessions WHERE user_id=?", s.id);
+      store.run(
+        "DELETE FROM login_limits WHERE key IN (?,?)",
+        `user:${s.username}`,
+        `change:${s.id}`,
+      );
     });
     res.json({ ok: true });
   });

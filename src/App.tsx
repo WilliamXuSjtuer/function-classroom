@@ -16,6 +16,7 @@ import { api, post } from "./api";
 import { Brand, Buddy, Badge } from "./components";
 import { Teacher } from "./teacher";
 import { Student } from "./student";
+import { StudentPassword } from "./student-password";
 export interface Bootstrap {
   classes: Classroom[];
   sessions: ClassSession[];
@@ -160,6 +161,9 @@ export default function App() {
           </div>
           <div className="topbar-right">
             {boot?.demo && <Badge tone="amber">演示环境 · 不作真实评价</Badge>}
+            {!teacher && (
+              <StudentPassword key={user.id} username={user.username} />
+            )}
             <span className="connection">
               <i />
               {teacher ? "课堂管理" : "以教促学"}
@@ -369,7 +373,7 @@ function Login({ onLogin }: { onLogin: (u: User) => void }) {
           </form>
           <div className="login-help">
             {role === "student"
-              ? "默认密码为学号后四位。遇到登录问题，请联系任课教师。"
+              ? "初始密码为学号后四位。忘记密码时，请联系任课教师重置。"
               : "使用管理员创建的教师账号登录。"}
           </div>
           {demo && (

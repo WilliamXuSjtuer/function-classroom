@@ -1,5 +1,6 @@
 import { Store, id, now } from "./db.js";
 import { hashPassword } from "./auth.js";
+import { initialStudentPassword } from "../shared/password.js";
 export async function seedDemo(store: Store) {
   if (store.get("SELECT 1 FROM users LIMIT 1")) return;
   const teacherId = id(),
@@ -39,7 +40,7 @@ export async function seedDemo(store: Store) {
       username,
       name,
       "student",
-      await hashPassword(username.slice(-4)),
+      await hashPassword(initialStudentPassword(username)),
       classId,
       now(),
     );

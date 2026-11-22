@@ -151,7 +151,12 @@ export function Teacher({ boot, refresh, page, setPage, notify }: Props) {
           </button>
         </Empty>
       ) : page === "students" ? (
-        <Members classroom={activeClass} refresh={refresh} notify={notify} />
+        <Members
+          key={activeClass.id}
+          classroom={activeClass}
+          refresh={refresh}
+          notify={notify}
+        />
       ) : page === "history" ? (
         <Records
           sessions={sessions}
@@ -648,7 +653,8 @@ function Members({
     [csv, setCsv] = useState(""),
     [busy, setBusy] = useState(false),
     [query, setQuery] = useState(""),
-    [reset, setReset] = useState<{ id: string; name: string } | null>(null);
+    [reset, setReset] = useState<(typeof students)[number] | null>(null),
+    [resetMessage, setResetMessage] = useState("");
   const load = async () =>
     setStudents(await api(`/classes/${classroom.id}/students`));
   useEffect(() => {
@@ -695,6 +701,11 @@ function Members({
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
+      {resetMessage && (
+        <p role="status" className="small">
+          {resetMessage}
+        </p>
+      )}
       {filtered.length ? (
         <div className="table-scroll">
           <table>
@@ -718,8 +729,14 @@ function Members({
                   <td className="mono">{s.username}</td>
                   <td>{classroom.name}</td>
                   <td>
-                    <button className="text-button" onClick={() => setReset(s)}>
-                      重置密码
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        setResetMessage("");
+                        setReset(s);
+                      }}
+                    >
+                      重置为初始密码
                     </button>
                   </td>
                 </tr>
@@ -779,10 +796,18 @@ function Members({
         <Modal
           title={`重置 ${reset.name} 的密码？`}
           onClose={() => setReset(null)}
+          closeDisabled={busy}
         >
-          <p>密码恢复为学号后四位，已有登录状态将失效。</p>
+          <p>
+            学号 {reset.username}{" "}
+            的密码将恢复为学号后四位。这位学生需要重新登录。
+          </p>
           <div className="modal-actions">
-            <button className="button" onClick={() => setReset(null)}>
+            <button
+              className="button"
+              disabled={busy}
+              onClick={() => setReset(null)}
+            >
               取消
             </button>
             <button
@@ -792,6 +817,9 @@ function Members({
                 setBusy(true);
                 try {
                   await post(`/students/${reset.id}/reset-password`);
+                  setResetMessage(
+                    `已重置 ${reset.name}（${reset.username}）的密码，请告知学生使用学号后四位登录。`,
+                  );
                   setReset(null);
                 } catch (e) {
                   notify((e as Error).message);
@@ -800,7 +828,7 @@ function Members({
                 }
               }}
             >
-              确认重置
+              {busy ? "正在重置…" : "确认重置"}
             </button>
           </div>
         </Modal>
