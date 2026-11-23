@@ -43,6 +43,25 @@ export async function createApp(config: Config, evaluator?: Evaluator) {
         JSON.stringify(valid),
         now(),
       );
+      const secondExercise = valid.exercises[1];
+      if (
+        valid.id === "monotonicity-definition" &&
+        secondExercise?.id === "monotonicity-definition-02"
+      ) {
+        // The teacher editor preserves the source. Only replace the legacy edition.
+        store.run(
+          `UPDATE lessons
+           SET content=json_set(content, '$.exercises[1]', json(?), '$.status', 'draft'),
+               revision=revision+1, updated_at=?
+           WHERE id=? AND json_extract(content, '$.exercises[1].id')=?
+             AND json_extract(content, '$.exercises[1].source')=?`,
+          JSON.stringify(secondExercise),
+          now(),
+          valid.id,
+          secondExercise.id,
+          "改编自导学案第32页例1（1）",
+        );
+      }
     }
   const app = express();
   app.disable("x-powered-by");

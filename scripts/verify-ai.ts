@@ -329,6 +329,61 @@ cases.push({
     /端点|区间|相反数|[−-]1|定义域/.test(r.feedback) &&
     !/再用自己的话|重新表述/.test(r.feedback),
 });
+const monotonicity = lessons.find((l) => l.id === "monotonicity-definition")!;
+const example9 = monotonicity.exercises[1];
+const example9Messages = [
+  message(
+    "example9",
+    example9.prompt + "\n" + example9.attempt,
+    "attempt",
+    1,
+    "assistant",
+  ),
+  {
+    ...message(
+      "whole",
+      "从0到1函数值下降，从1到2又上升，整个区间不单调。",
+      "judge",
+      1,
+    ),
+    judgment: false,
+  },
+  {
+    ...message(
+      "directions",
+      "左边[-2,1]严格递减，右边[1,2]严格递增，你把两个方向说反了。",
+      "judge",
+      1,
+    ),
+    judgment: false,
+  },
+];
+cases.push(
+  {
+    name: "例9：只改正整体和分段结论，仍须追问证明",
+    input: { ...input(example9Messages), lesson: monotonicity },
+    accepts: (r) => !r.corrected,
+  },
+  {
+    name: "例9：接纳跨轮纠正及任意性的口语表达",
+    input: {
+      ...input([
+        ...example9Messages,
+        {
+          ...message(
+            "proof",
+            "只算一对点不够。无论在同一段里选哪两个数，只要前小后大，第一个因子就为负；两数之和在左段小于2，在右段大于2，所以左段函数值之差为正，右段为负。",
+            "judge",
+            1,
+          ),
+          judgment: false,
+        },
+      ]),
+      lesson: monotonicity,
+    },
+    accepts: (r) => r.reasoningAccepted && r.corrected,
+  },
+);
 const results = [];
 for (const c of cases) {
   const start = Date.now();
